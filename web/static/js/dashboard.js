@@ -95,6 +95,19 @@ async function refreshConnections() {
     }
 }
 
+// Refresh entire dashboard
+async function refreshDashboard() {
+    try {
+        const response = await fetch('/api/stats');
+        const data = await response.json();
+        updateDashboard(data);
+        updateTrafficData();
+        refreshConnections();
+    } catch (error) {
+        console.error('Error refreshing dashboard:', error);
+    }
+}
+
 // Update connections table with new data
 function updateConnectionsTable(connections) {
     const tbody = document.getElementById('connectionsBody');
@@ -112,7 +125,7 @@ function updateConnectionsTable(connections) {
         
         row.innerHTML = '' +
             '<td class="source-cell">' +
-                '<span class="ip">' + conn.source_ip + '</span>' +
+                '<span class="ip clickable-ip" onclick="showSourceIPManagement(\'' + conn.source_ip + '\')">' + conn.source_ip + '</span>' +
                 '<span class="port">:' + conn.source_port + '</span>' +
             '</td>' +
             '<td class="dest-cell">' +
@@ -132,7 +145,7 @@ function updateConnectionsTable(connections) {
             '</td>' +
             '<td class="actions-cell">' +
                 '<button class="btn btn-small btn-primary" ' +
-                        'onclick="showWeightModal(\'' + conn.source_ip + '\', \'' + conn.load_balancer + '\')">' +
+                        'onclick="showWeightModal(\'' + conn.source_ip + '\')">' +
                     'Set Weight' +
                 '</button>' +
             '</td>';
@@ -152,7 +165,7 @@ function updateTrafficData() {
             const activeConnectionsEl = document.getElementById('activeConnections');
             const connectionsPerMinuteEl = document.getElementById('connectionsPerMinute');
             
-            if (bytesPerSecondEl) bytesPerSecondEl.textContent = formatBytes(data.bytes_per_second);
+            if (bytesPerSecondEl) bytesPerSecondEl.textContent = formatBytes(data.bytes_per_second) + '/s';
             if (totalDataTransferredEl) totalDataTransferredEl.textContent = formatBytes(data.total_data_transferred);
             if (activeConnectionsEl) activeConnectionsEl.textContent = data.active_connections;
             if (connectionsPerMinuteEl) connectionsPerMinuteEl.textContent = data.connections_per_minute;
@@ -179,7 +192,7 @@ function updateTrafficBars() {
                     bar.style.width = percentage + '%';
                     const textEl = bar.querySelector('.traffic-bar-text');
                     if (textEl) {
-                        textEl.textContent = lb.total_connections + ' connections';
+                        textEl.textContent = lb.total_connections + ' connections (' + percentage.toFixed(1) + '%)';
                     }
                 }
             });
@@ -205,19 +218,244 @@ function stopTrafficRefresh() {
     }
 }
 
-// Initialize auto-refresh when page loads
+// Modal Management Functions
+function showModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.style.display = 'block';
+        stopAutoRefresh(); // Pause auto-refresh while modal is open
+    }
+}
+
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.style.display = 'none';
+        startAutoRefresh(); // Resume auto-refresh
+    }
+}
+
+// Source IP Management
+function showSourceIPManagement(sourceIP) {
+    document.getElementById('sourceIPModalContent').innerHTML = 
+        '<div class="loading">Loading rules for ' + sourceIP + '...</div>';
+    
+    showModal('sourceIPModal');
+    
+    // Load existing rules for this source IP
+    fetch('/api/stats')
+        .then(response => response.json())
+        .then(data => {
+            let content = '<div class="source-ip-management">';
+            content += '<h4>Source IP: <code>' + sourceIP + '</code></h4>';
+            content += '<p>Configure custom load balancing rules for this source IP.</p>';
+            
+            content += '<div class="lb-rules-grid">';
+            data.load_balancers.forEach(lb => {
+                const hasRule = lb.source_ip_rules && lb.source_ip_rules[sourceIP];
+                const ratio = hasRule ? lb.source_ip_rules[sourceIP].contention_ratio : lb.default_ratio;
+                
+                content += '<div class="lb-rule-card">';
+                content += '<h5>LB' + lb.id + ': ' + lb.address + '</h5>';
+                content += '<p><strong>Interface:</strong> ' + lb.interface + '</p>';
+                content += '<p><strong>Current Ratio:</strong> ' + ratio + '</p>';
+                
+                if (hasRule) {
+                    content += '<p class="custom-rule">✓ Custom rule active</p>';
+                    content += '<button class="btn btn-small btn-danger" onclick="removeSourceIPRule(\'' + 
+                               lb.address + '\', \'' + sourceIP + '\')">Remove Rule</button>';
+                } else {
+                    content += '<p class="default-rule">Using default ratio</p>';
+                }
+                
+                content += '<button class="btn btn-small btn-primary" onclick="showWeightModalForLB(\'' + 
+                           sourceIP + '\', \'' + lb.address + '\')">Set Custom Ratio</button>';
+                content += '</div>';
+            });
+            content += '</div>';
+            
+            content += '</div>';
+            document.getElementById('sourceIPModalContent').innerHTML = content;
+        })
+        .catch(error => {
+            document.getElementById('sourceIPModalContent').innerHTML = 
+                '<div class="error">Error loading rules: ' + error.message + '</div>';
+        });
+}
+
+// Add Rule Modal
+function showAddRuleModal(lbAddress) {
+    document.getElementById('modalLBAddress').value = lbAddress;
+    document.getElementById('sourceIP').value = '';
+    document.getElementById('contentionRatio').value = '1';
+    document.getElementById('description').value = '';
+    showModal('addRuleModal');
+}
+
+// Weight Modal
+function showWeightModal(sourceIP) {
+    document.getElementById('weightSourceIP').value = sourceIP;
+    document.getElementById('weightSourceIPDisplay').textContent = sourceIP;
+    document.getElementById('weightRatio').value = '1';
+    document.getElementById('weightDescription').value = '';
+    showModal('weightModal');
+}
+
+function showWeightModalForLB(sourceIP, lbAddress) {
+    document.getElementById('weightSourceIP').value = sourceIP;
+    document.getElementById('weightSourceIPDisplay').textContent = sourceIP;
+    document.getElementById('weightLBSelect').value = lbAddress;
+    document.getElementById('weightRatio').value = '1';
+    document.getElementById('weightDescription').value = '';
+    closeModal('sourceIPModal');
+    showModal('weightModal');
+}
+
+// Load Balancer Toggle
+async function toggleLoadBalancer(lbAddress, enabled) {
+    try {
+        const response = await fetch('/api/lb/toggle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                lb_address: lbAddress,
+                enabled: enabled
+            })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            console.log('Load balancer toggled successfully');
+            refreshDashboard();
+        } else {
+            console.error('Failed to toggle load balancer');
+            // Revert checkbox state
+            location.reload();
+        }
+    } catch (error) {
+        console.error('Error toggling load balancer:', error);
+        location.reload();
+    }
+}
+
+// Remove Rule
+async function removeRule(lbAddress, sourceIP) {
+    if (!confirm('Remove rule for ' + sourceIP + ' on ' + lbAddress + '?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/rules?lb_address=' + encodeURIComponent(lbAddress) + 
+                                   '&source_ip=' + encodeURIComponent(sourceIP), {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            console.log('Rule removed successfully');
+            refreshDashboard();
+        } else {
+            alert('Failed to remove rule');
+        }
+    } catch (error) {
+        console.error('Error removing rule:', error);
+        alert('Error removing rule: ' + error.message);
+    }
+}
+
+async function removeSourceIPRule(lbAddress, sourceIP) {
+    await removeRule(lbAddress, sourceIP);
+    closeModal('sourceIPModal');
+    setTimeout(() => showSourceIPManagement(sourceIP), 500);
+}
+
+// Form Submissions
 document.addEventListener('DOMContentLoaded', function() {
+    // Add Rule Form
+    const addRuleForm = document.getElementById('addRuleForm');
+    if (addRuleForm) {
+        addRuleForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(addRuleForm);
+            const data = {
+                lb_address: formData.get('lb_address'),
+                source_ip: formData.get('source_ip'),
+                contention_ratio: parseInt(formData.get('contention_ratio')),
+                description: formData.get('description')
+            };
+            
+            try {
+                const response = await fetch('/api/rules', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    closeModal('addRuleModal');
+                    refreshDashboard();
+                } else {
+                    alert('Failed to add rule');
+                }
+            } catch (error) {
+                console.error('Error adding rule:', error);
+                alert('Error adding rule: ' + error.message);
+            }
+        });
+    }
+    
+    // Weight Form
+    const weightForm = document.getElementById('weightForm');
+    if (weightForm) {
+        weightForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(weightForm);
+            const data = {
+                source_ip: formData.get('source_ip'),
+                lb_address: formData.get('lb_address'),
+                contention_ratio: parseInt(formData.get('contention_ratio')),
+                description: formData.get('description')
+            };
+            
+            try {
+                const response = await fetch('/api/connection/weight', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    closeModal('weightModal');
+                    refreshDashboard();
+                } else {
+                    alert('Failed to set weight');
+                }
+            } catch (error) {
+                console.error('Error setting weight:', error);
+                alert('Error setting weight: ' + error.message);
+            }
+        });
+    }
+    
+    // Start auto-refresh
     startAutoRefresh();
     startTrafficRefresh();
 });
 
-// Stop auto-refresh when page is hidden
-document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'hidden') {
-        stopAutoRefresh();
-        stopTrafficRefresh();
-    } else {
+// Close modals when clicking outside
+window.addEventListener('click', function(event) {
+    if (event.target.classList.contains('modal')) {
+        event.target.style.display = 'none';
         startAutoRefresh();
-        startTrafficRefresh();
     }
 }); 
