@@ -1,0 +1,26 @@
+{
+  "192.168.1.10:0": {
+    "192.168.0.100": {
+      "source_ip": "192.168.0.100",
+      "contention_ratio": 5,
+      "description": "High priority client - more bandwidth"
+    },
+    "192.168.0.101": {
+      "source_ip": "192.168.0.101", 
+      "contention_ratio": 1,
+      "description": "Low priority client - reduced bandwidth"
+    },
+    "10.0.0.0/24": {
+      "source_ip": "10.0.0.0/24",
+      "contention_ratio": 3,
+      "description": "VPN subnet - medium priority"
+    }
+  },
+  "10.81.201.18:0": {
+    "192.168.0.100": {
+      "source_ip": "192.168.0.100",
+      "contention_ratio": 2,
+      "description": "Specific routing for mobile connection"
+    }
+  }
+} 

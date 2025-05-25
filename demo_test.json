@@ -1,0 +1,26 @@
+{
+  "192.168.178.147:0": {
+    "192.168.178.1": {
+      "source_ip": "192.168.178.1",
+      "contention_ratio": 5,
+      "description": "Router - High Priority"
+    },
+    "192.168.178.100": {
+      "source_ip": "192.168.178.100",
+      "contention_ratio": 3,
+      "description": "Main Computer - Medium Priority"
+    },
+    "10.0.0.0/24": {
+      "source_ip": "10.0.0.0/24",
+      "contention_ratio": 2,
+      "description": "VPN Network - Low Priority"
+    }
+  },
+  "192.168.178.22:0": {
+    "192.168.178.1": {
+      "source_ip": "192.168.178.1",
+      "contention_ratio": 2,
+      "description": "Router via Secondary Interface"
+    }
+  }
+} 
