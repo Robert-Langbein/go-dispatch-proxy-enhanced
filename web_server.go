@@ -80,6 +80,19 @@ type GlobalTrafficStats struct {
 	UptimeSeconds       float64 `json:"uptime_seconds"`
 }
 
+// Real-time traffic monitoring
+type TrafficSample struct {
+	timestamp time.Time
+	totalBytes int64
+}
+
+var (
+	trafficSamples     []TrafficSample
+	trafficSamplesMutex sync.RWMutex
+	lastSampleTime     time.Time
+	currentBytesPerSecond int64
+)
+
 var (
 	webServer *WebServer
 	startTime time.Time
@@ -88,6 +101,66 @@ var (
 
 func init() {
 	startTime = time.Now()
+	
+	// Initialize traffic monitoring
+	trafficSamples = make([]TrafficSample, 0, 10) // Keep last 10 seconds
+	lastSampleTime = time.Now()
+	
+	// Start traffic monitoring goroutine
+	go trafficMonitor()
+}
+
+// Traffic monitoring function
+func trafficMonitor() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		updateTrafficSpeed()
+	}
+}
+
+// Update current bytes per second based on recent samples
+func updateTrafficSpeed() {
+	trafficSamplesMutex.Lock()
+	defer trafficSamplesMutex.Unlock()
+	
+	now := time.Now()
+	currentTotal := atomic.LoadInt64(&total_data_transferred)
+	
+	// Add current sample
+	trafficSamples = append(trafficSamples, TrafficSample{
+		timestamp:  now,
+		totalBytes: currentTotal,
+	})
+	
+	// Remove samples older than 5 seconds
+	cutoff := now.Add(-5 * time.Second)
+	for i := 0; i < len(trafficSamples); i++ {
+		if trafficSamples[i].timestamp.After(cutoff) {
+			trafficSamples = trafficSamples[i:]
+			break
+		}
+	}
+	
+	// Calculate current speed based on last 3-5 seconds
+	if len(trafficSamples) >= 2 {
+		latest := trafficSamples[len(trafficSamples)-1]
+		earliest := trafficSamples[0]
+		
+		// Calculate bytes per second over the sample period
+		timeDiff := latest.timestamp.Sub(earliest.timestamp).Seconds()
+		bytesDiff := latest.totalBytes - earliest.totalBytes
+		
+		if timeDiff > 0 {
+			atomic.StoreInt64(&currentBytesPerSecond, int64(float64(bytesDiff)/timeDiff))
+		}
+	}
+}
+
+// Get current real-time speed
+func getCurrentBytesPerSecond() int64 {
+	return atomic.LoadInt64(&currentBytesPerSecond)
 }
 
 /*
@@ -477,10 +550,8 @@ func (ws *WebServer) handleAPITraffic(w http.ResponseWriter, r *http.Request) {
 				UptimeSeconds:        uptime.Seconds(),
 			}
 			
-			// Calculate rates
-			if uptime.Seconds() > 0 {
-				traffic.BytesPerSecond = int64(float64(traffic.TotalDataTransferred) / uptime.Seconds())
-			}
+			// Calculate rates - use real-time speed
+			traffic.BytesPerSecond = getCurrentBytesPerSecond()
 			
 			json.NewEncoder(w).Encode(traffic)
 		} else {
@@ -706,7 +777,8 @@ func (ws *WebServer) getDashboardData() DashboardData {
 	
 	// Calculate traffic rates
 	if uptime.Seconds() > 0 {
-		data.TrafficStats.BytesPerSecond = int64(float64(data.TrafficStats.TotalDataTransferred) / uptime.Seconds())
+		// Use real-time speed instead of average since start
+		data.TrafficStats.BytesPerSecond = getCurrentBytesPerSecond()
 		data.TrafficStats.ConnectionsPerMinute = int64(float64(data.TotalConnections) / uptime.Minutes())
 	}
 	

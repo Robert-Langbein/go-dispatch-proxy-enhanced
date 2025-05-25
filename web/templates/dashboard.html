@@ -175,7 +175,10 @@
                             <i class="fas fa-download"></i>
                         </div>
                         <div class="traffic-content">
-                            <div class="traffic-value" id="bytesPerSecond">{{formatBytes .TrafficStats.BytesPerSecond}}/s</div>
+                            <div class="traffic-value" id="bytesPerSecond">
+                                {{formatBytes .TrafficStats.BytesPerSecond}}/s
+                                <small class="speed-bits">0 bit/s</small>
+                            </div>
                             <div class="traffic-label">Transfer Rate</div>
                         </div>
                     </div>

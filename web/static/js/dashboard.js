@@ -165,7 +165,11 @@ function updateTrafficData() {
             const activeConnectionsEl = document.getElementById('activeConnections');
             const connectionsPerMinuteEl = document.getElementById('connectionsPerMinute');
             
-            if (bytesPerSecondEl) bytesPerSecondEl.textContent = formatBytes(data.bytes_per_second) + '/s';
+            if (bytesPerSecondEl) {
+                const bytesRate = formatBytes(data.bytes_per_second) + '/s';
+                const bitsRate = formatBits(data.bytes_per_second * 8) + 'bit/s';
+                bytesPerSecondEl.innerHTML = bytesRate + '<br><small class="speed-bits">' + bitsRate + '</small>';
+            }
             if (totalDataTransferredEl) totalDataTransferredEl.textContent = formatBytes(data.total_data_transferred);
             if (activeConnectionsEl) activeConnectionsEl.textContent = data.active_connections;
             if (connectionsPerMinuteEl) connectionsPerMinuteEl.textContent = data.connections_per_minute;
@@ -214,7 +218,7 @@ function startTrafficRefresh() {
             updateTrafficData();
             refreshConnections();
         }
-    }, 2000); // Update every 2 seconds for real-time feel
+    }, 1000); // Update every 1 second for real-time feel
 }
 
 function stopTrafficRefresh() {

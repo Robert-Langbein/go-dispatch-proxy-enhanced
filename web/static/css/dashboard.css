@@ -608,6 +608,16 @@ input:checked + .toggle-slider:before {
     font-weight: 700;
     color: var(--unifi-text-primary);
     margin-bottom: 4px;
+    line-height: 1.2;
+}
+
+.speed-bits {
+    font-size: 11px;
+    color: var(--unifi-text-secondary);
+    font-weight: 400;
+    opacity: 0.8;
+    display: block;
+    margin-top: 2px;
 }
 
 .traffic-label {

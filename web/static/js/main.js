@@ -107,6 +107,14 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+function formatBits(bits) {
+    if (bits === 0) return '0 ';
+    const k = 1000; // Use 1000 for bits (networking standard)
+    const sizes = ['', 'k', 'M', 'G', 'T'];
+    const i = Math.floor(Math.log(bits) / Math.log(k));
+    return parseFloat((bits / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
 function formatDuration(startTime) {
     const now = new Date();
     const diff = Math.floor((now - startTime) / 1000);
