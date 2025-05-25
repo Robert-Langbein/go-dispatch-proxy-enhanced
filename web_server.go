@@ -83,6 +83,7 @@ type GlobalTrafficStats struct {
 var (
 	webServer *WebServer
 	startTime time.Time
+	webServerPort int
 )
 
 func init() {
@@ -614,10 +615,12 @@ func (ws *WebServer) getDashboardData() DashboardData {
 		for sourceIP, count := range lb.source_ip_counters {
 			if sourceInfo, exists := sourceMap[sourceIP]; exists {
 				sourceInfo.ActiveConnections += count
+				sourceInfo.TotalConnections += lb.total_connections
 			} else {
 				effectiveRatio := get_effective_contention_ratio(&lb, sourceIP)
 				sourceMap[sourceIP] = &SourceIPInfo{
 					SourceIP:          sourceIP,
+					TotalConnections:  lb.total_connections,
 					ActiveConnections: count,
 					AssignedLB:        lb.address,
 					EffectiveRatio:    effectiveRatio,
@@ -630,7 +633,7 @@ func (ws *WebServer) getDashboardData() DashboardData {
 	data.TotalSuccess = totalSuccess
 	data.TotalFailures = totalFailures
 	
-	if totalConnections > 0 {
+	if (totalSuccess + totalFailures) > 0 {
 		data.OverallSuccessRate = float64(totalSuccess) / float64(totalSuccess + totalFailures) * 100
 	}
 	
@@ -643,7 +646,7 @@ func (ws *WebServer) getDashboardData() DashboardData {
 		Version:       "Enhanced v3.0 Real-time",
 		Uptime:        time.Since(global_start_time).Round(time.Second).String(),
 		ConfigFile:    config_file,
-		ListenAddress: fmt.Sprintf(":%d", 8080), // This should be dynamic
+		ListenAddress: fmt.Sprintf(":%d", webServerPort),
 		TotalLBs:      len(lb_list),
 		StartTime:     global_start_time,
 	}
@@ -766,6 +769,7 @@ func startWebServer(port int) {
 		return // Web server disabled
 	}
 	
+	webServerPort = port // Store port for use in dashboard
 	webServer = NewWebServer(port)
 	
 	go func() {

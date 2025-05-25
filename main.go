@@ -625,7 +625,7 @@ func get_iface_from_ip(ip string) string {
 				if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 					if ipnet.IP.To4() != nil {
 						if ipnet.IP.String() == ip {
-							return iface.Name + "\x00"
+							return iface.Name
 						}
 					}
 				}
