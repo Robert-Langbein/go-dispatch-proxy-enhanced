@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 )
 
 /*
@@ -164,21 +165,32 @@ func client_conection_request(conn net.Conn) (string, error) {
 
  */
 func handle_socks_connection(conn net.Conn) (string, error) {
+	// Set timeout for SOCKS handshake
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
 
 	if _, _, err := client_greeting(conn); err != nil {
-		log.Println(err)
+		if debug_mode {
+			log.Println(err)
+		}
 		return "", err
 	}
 
 	if err := servers_choice(conn); err != nil {
-		log.Println(err)
+		if debug_mode {
+			log.Println(err)
+		}
 		return "", err
 	}
 
 	address, err := client_conection_request(conn)
 	if err != nil {
-		log.Println(err)
+		if debug_mode {
+			log.Println(err)
+		}
 		return "", err
 	}
+	
+	// Clear deadline after successful handshake
+	conn.SetDeadline(time.Time{})
 	return address, nil
 }

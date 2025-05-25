@@ -99,6 +99,23 @@ var global_start_time time.Time
 // Performance counters
 var total_data_transferred int64
 
+// Connection timeout and limits
+const (
+	connection_timeout = 30 * time.Second
+	idle_timeout      = 5 * time.Minute
+	max_goroutines    = 1000 // Limit concurrent goroutines
+	handshake_timeout = 10 * time.Second
+	dns_timeout      = 8 * time.Second
+)
+
+var active_goroutines int64
+
+// Connection rate limiting
+var (
+	connection_semaphore = make(chan struct{}, max_goroutines/2) // Limit concurrent connections
+	last_cleanup time.Time
+)
+
 func init() {
 	active_connections = make(map[string]*active_connection)
 	connection_mutex = &sync.RWMutex{}
@@ -414,18 +431,33 @@ func remove_active_connection(conn_id string) {
 Cleanup old connections (performance optimization)
 */
 func cleanup_old_connections() {
-	cutoff := time.Now().Add(-5 * time.Minute) // Remove connections older than 5 minutes
+	connection_mutex.Lock()
+	defer connection_mutex.Unlock()
+	
+	cutoff := time.Now().Add(-idle_timeout) // Remove connections older than idle_timeout
 	removed := 0
 	
 	for id, conn := range active_connections {
 		if conn.LastActivity.Before(cutoff) || conn.Status == "closed" {
+			// Add to history before removing
+			if len(connection_history) >= max_connections {
+				connection_history = connection_history[1:]
+			}
+			conn.Status = "expired"
+			connection_history = append(connection_history, *conn)
+			
 			delete(active_connections, id)
 			removed++
 		}
 	}
 	
-	if removed > 0 {
-		log.Printf("[INFO] Cleaned up %d old connections", removed)
+	// Also clean up history if it gets too large
+	if len(connection_history) > max_connections*2 {
+		connection_history = connection_history[len(connection_history)-max_connections:]
+	}
+	
+	if removed > 0 && debug_mode {
+		log.Printf("[DEBUG] Cleaned up %d old connections", removed)
 	}
 }
 
@@ -460,15 +492,25 @@ func get_active_connections(source_filter, destination_filter string, limit int)
 }
 
 /*
-Custom io.Copy with traffic monitoring
+Custom io.Copy with traffic monitoring and timeout
 */
 func monitored_copy(dst io.Writer, src io.Reader, conn_id string, direction string) (int64, error) {
 	buffer := make([]byte, 32*1024) // 32KB buffer for performance
 	var total int64
 	
+	// Set read deadline for timeout detection
+	if conn, ok := src.(net.Conn); ok {
+		conn.SetReadDeadline(time.Now().Add(idle_timeout))
+	}
+	
 	for {
 		nr, er := src.Read(buffer)
 		if nr > 0 {
+			// Reset deadline on successful read
+			if conn, ok := src.(net.Conn); ok {
+				conn.SetReadDeadline(time.Now().Add(idle_timeout))
+			}
+			
 			nw, ew := dst.Write(buffer[0:nr])
 			if nw < 0 || nr < nw {
 				nw = 0
@@ -507,26 +549,46 @@ func monitored_copy(dst io.Writer, src io.Reader, conn_id string, direction stri
 Enhanced pipe connections with traffic monitoring
 */
 func pipe_connections(local_conn, remote_conn net.Conn, conn_id string) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	
+	// Ensure connections are only closed once
+	var closeOnce sync.Once
+	
+	closeConnections := func() {
+		if local_conn != nil {
+			local_conn.Close()
+		}
+		if remote_conn != nil {
+			remote_conn.Close()
+		}
+		remove_active_connection(conn_id)
+	}
+
+	// Copy from local to remote (outbound)
 	go func() {
-		defer remote_conn.Close()
-		defer local_conn.Close()
-		defer remove_active_connection(conn_id)
+		defer wg.Done()
+		defer closeOnce.Do(closeConnections)
 		
 		_, err := monitored_copy(remote_conn, local_conn, conn_id, "out")
-		if err != nil {
+		if err != nil && debug_mode {
 			log.Printf("[DEBUG] Connection %s outbound error: %v", conn_id, err)
 		}
 	}()
 
+	// Copy from remote to local (inbound)
 	go func() {
-		defer remote_conn.Close()
-		defer local_conn.Close()
+		defer wg.Done()
+		defer closeOnce.Do(closeConnections)
 		
 		_, err := monitored_copy(local_conn, remote_conn, conn_id, "in")
-		if err != nil {
+		if err != nil && debug_mode {
 			log.Printf("[DEBUG] Connection %s inbound error: %v", conn_id, err)
 		}
 	}()
+	
+	// Wait for both goroutines to complete
+	wg.Wait()
 }
 
 /*
@@ -581,11 +643,66 @@ retry:
 Calls the appropriate handle_connections based on tunnel mode with enhanced features
 */
 func handle_connection(conn net.Conn, tunnel bool) {
+	// Check goroutine limit
+	if atomic.LoadInt64(&active_goroutines) >= max_goroutines {
+		log.Printf("[WARN] Maximum goroutines reached, rejecting connection")
+		conn.Close()
+		return
+	}
+	
+	// Acquire connection semaphore (non-blocking)
+	select {
+	case connection_semaphore <- struct{}{}:
+		defer func() { <-connection_semaphore }()
+	default:
+		if debug_mode {
+			log.Printf("[DEBUG] Connection semaphore full, rejecting connection")
+		}
+		conn.Close()
+		return
+	}
+	
+	atomic.AddInt64(&active_goroutines, 1)
+	defer atomic.AddInt64(&active_goroutines, -1)
+	
+	// Set initial connection timeout for handshake
+	conn.SetDeadline(time.Now().Add(handshake_timeout))
+	
 	source_ip := get_source_ip(conn)
+	
 	if tunnel {
 		handle_tunnel_connection(conn)
-	} else if address, err := handle_socks_connection(conn); err == nil {
-		enhanced_server_response(conn, address, source_ip)
+	} else {
+		// Handle SOCKS connection with immediate processing
+		if debug_mode {
+			log.Printf("[DEBUG] Starting SOCKS handshake for %s", source_ip)
+		}
+		
+		if address, err := handle_socks_connection(conn); err == nil {
+			if debug_mode {
+				log.Printf("[DEBUG] SOCKS handshake successful for %s -> %s", source_ip, address)
+			}
+			
+			// Start server response in separate goroutine to prevent blocking
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[ERROR] Panic in server response for %s: %v", source_ip, r)
+						conn.Close()
+					}
+				}()
+				
+				if debug_mode {
+					log.Printf("[DEBUG] Starting enhanced_server_response for %s -> %s", source_ip, address)
+				}
+				enhanced_server_response(conn, address, source_ip)
+			}()
+		} else {
+			if debug_mode {
+				log.Printf("[DEBUG] SOCKS handshake failed for %s: %v", source_ip, err)
+			}
+			conn.Close()
+		}
 	}
 }
 
@@ -809,6 +926,38 @@ func main() {
 	}
 
 	mutex = &sync.Mutex{}
+	
+	// Start cleanup goroutine for old connections
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				cleanup_old_connections()
+			}
+		}
+	}()
+	
+	// Start resource monitoring
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				goroutines := atomic.LoadInt64(&active_goroutines)
+				connections := len(active_connections)
+				if debug_mode {
+					log.Printf("[DEBUG] Resources: %d goroutines, %d active connections", goroutines, connections)
+				}
+				if goroutines > max_goroutines*8/10 { // 80% threshold
+					log.Printf("[WARN] High goroutine usage: %d/%d", goroutines, max_goroutines)
+				}
+			}
+		}
+	}()
+	
 	for {
 		conn, err := l.Accept()
 		if err != nil {

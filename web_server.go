@@ -575,109 +575,139 @@ func (ws *WebServer) handleStatic(w http.ResponseWriter, r *http.Request) {
 Get dashboard data
 */
 func (ws *WebServer) getDashboardData() DashboardData {
-	mutex.Lock()
-	defer mutex.Unlock()
-	
 	var data DashboardData
-	data.LoadBalancers = make([]LoadBalancerWebInfo, len(lb_list))
 	
-	totalConnections := 0
-	totalSuccess := 0
-	totalFailures := 0
-	sourceMap := make(map[string]*SourceIPInfo)
-	
-	for i, lb := range lb_list {
-		successRate := 0.0
-		total := lb.success_count + lb.failure_count
-		if total > 0 {
-			successRate = float64(lb.success_count) / float64(total) * 100
-		}
+	// Collect load balancer data with minimal locking
+	func() {
+		mutex.Lock()
+		defer mutex.Unlock()
 		
-		data.LoadBalancers[i] = LoadBalancerWebInfo{
-			ID:               i + 1,
-			Address:          lb.address,
-			Interface:        lb.iface,
-			DefaultRatio:     lb.contention_ratio,
-			Enabled:          lb.enabled,
-			TotalConnections: lb.total_connections,
-			SuccessCount:     lb.success_count,
-			FailureCount:     lb.failure_count,
-			SuccessRate:      successRate,
-			SourceIPRules:    lb.source_ip_rules,
-			ActiveSources:    lb.source_ip_counters,
-		}
+		data.LoadBalancers = make([]LoadBalancerWebInfo, len(lb_list))
 		
-		totalConnections += lb.total_connections
-		totalSuccess += lb.success_count
-		totalFailures += lb.failure_count
+		totalConnections := 0
+		totalSuccess := 0
+		totalFailures := 0
+		sourceMap := make(map[string]*SourceIPInfo)
 		
-		// Collect source IP information
-		for sourceIP, count := range lb.source_ip_counters {
-			if sourceInfo, exists := sourceMap[sourceIP]; exists {
-				sourceInfo.ActiveConnections += count
-				sourceInfo.TotalConnections += lb.total_connections
-			} else {
-				effectiveRatio := get_effective_contention_ratio(&lb, sourceIP)
-				sourceMap[sourceIP] = &SourceIPInfo{
-					SourceIP:          sourceIP,
-					TotalConnections:  lb.total_connections,
-					ActiveConnections: count,
-					AssignedLB:        lb.address,
-					EffectiveRatio:    effectiveRatio,
+		for i, lb := range lb_list {
+			successRate := 0.0
+			total := lb.success_count + lb.failure_count
+			if total > 0 {
+				successRate = float64(lb.success_count) / float64(total) * 100
+			}
+			
+			// Deep copy maps to avoid race conditions
+			sourceIPRulesCopy := make(map[string]source_ip_rule)
+			for k, v := range lb.source_ip_rules {
+				sourceIPRulesCopy[k] = v
+			}
+			
+			activeSourcesCopy := make(map[string]int)
+			for k, v := range lb.source_ip_counters {
+				activeSourcesCopy[k] = v
+			}
+			
+			data.LoadBalancers[i] = LoadBalancerWebInfo{
+				ID:               i + 1,
+				Address:          lb.address,
+				Interface:        lb.iface,
+				DefaultRatio:     lb.contention_ratio,
+				Enabled:          lb.enabled,
+				TotalConnections: lb.total_connections,
+				SuccessCount:     lb.success_count,
+				FailureCount:     lb.failure_count,
+				SuccessRate:      successRate,
+				SourceIPRules:    sourceIPRulesCopy,
+				ActiveSources:    activeSourcesCopy,
+			}
+			
+			totalConnections += lb.total_connections
+			totalSuccess += lb.success_count
+			totalFailures += lb.failure_count
+			
+			// Collect source IP information
+			for sourceIP, count := range activeSourcesCopy {
+				if sourceInfo, exists := sourceMap[sourceIP]; exists {
+					sourceInfo.ActiveConnections += count
+					sourceInfo.TotalConnections += lb.total_connections
+				} else {
+					effectiveRatio := get_effective_contention_ratio(&lb, sourceIP)
+					sourceMap[sourceIP] = &SourceIPInfo{
+						SourceIP:          sourceIP,
+						TotalConnections:  lb.total_connections,
+						ActiveConnections: count,
+						AssignedLB:        lb.address,
+						EffectiveRatio:    effectiveRatio,
+					}
 				}
 			}
 		}
-	}
+		
+		data.TotalConnections = totalConnections
+		data.TotalSuccess = totalSuccess
+		data.TotalFailures = totalFailures
+		
+		if (totalSuccess + totalFailures) > 0 {
+			data.OverallSuccessRate = float64(totalSuccess) / float64(totalSuccess + totalFailures) * 100
+		}
+		
+		// Convert source map to slice
+		for _, sourceInfo := range sourceMap {
+			data.ActiveSources = append(data.ActiveSources, *sourceInfo)
+		}
+		
+		data.SystemInfo = SystemInfo{
+			Version:       "Enhanced v3.0 Real-time",
+			Uptime:        time.Since(global_start_time).Round(time.Second).String(),
+			ConfigFile:    config_file,
+			ListenAddress: fmt.Sprintf(":%d", webServerPort),
+			TotalLBs:      len(lb_list),
+			StartTime:     global_start_time,
+		}
+	}()
 	
-	data.TotalConnections = totalConnections
-	data.TotalSuccess = totalSuccess
-	data.TotalFailures = totalFailures
+	// Get connection data with separate locking
+	data.ActiveConnections = get_active_connections("", "", 50)
 	
-	if (totalSuccess + totalFailures) > 0 {
-		data.OverallSuccessRate = float64(totalSuccess) / float64(totalSuccess + totalFailures) * 100
-	}
+	// Get connection history with separate locking
+	func() {
+		connection_mutex.RLock()
+		defer connection_mutex.RUnlock()
+		
+		if len(connection_history) > 20 {
+			// Create a copy to avoid race conditions
+			copyLen := 20
+			data.ConnectionHistory = make([]active_connection, copyLen)
+			copy(data.ConnectionHistory, connection_history[len(connection_history)-copyLen:])
+		} else if len(connection_history) > 0 {
+			data.ConnectionHistory = make([]active_connection, len(connection_history))
+			copy(data.ConnectionHistory, connection_history)
+		}
+	}()
 	
-	// Convert source map to slice
-	for _, sourceInfo := range sourceMap {
-		data.ActiveSources = append(data.ActiveSources, *sourceInfo)
-	}
+	// Get safe connection count
+	var activeConnectionCount int
+	func() {
+		connection_mutex.RLock()
+		defer connection_mutex.RUnlock()
+		activeConnectionCount = len(active_connections)
+	}()
 	
-	data.SystemInfo = SystemInfo{
-		Version:       "Enhanced v3.0 Real-time",
-		Uptime:        time.Since(global_start_time).Round(time.Second).String(),
-		ConfigFile:    config_file,
-		ListenAddress: fmt.Sprintf(":%d", webServerPort),
-		TotalLBs:      len(lb_list),
-		StartTime:     global_start_time,
-	}
-	
-	// Get real-time connection data
-	data.ActiveConnections = get_active_connections("", "", 50) // Limit to 50 for dashboard
-	
-	// Add connection history
-	connection_mutex.RLock()
-	if len(connection_history) > 20 {
-		data.ConnectionHistory = connection_history[len(connection_history)-20:] // Last 20 entries
-	} else {
-		data.ConnectionHistory = connection_history
-	}
-	connection_mutex.RUnlock()
-	
-	// Traffic statistics
+	// Traffic statistics (atomic operations are thread-safe)
 	uptime := time.Since(global_start_time)
 	data.TrafficStats = GlobalTrafficStats{
 		TotalBytesIn:         atomic.LoadInt64(&global_bytes_in),
 		TotalBytesOut:        atomic.LoadInt64(&global_bytes_out),
 		TotalDataTransferred: atomic.LoadInt64(&total_data_transferred),
-		ActiveConnections:    len(active_connections),
-		TotalConnections:     totalConnections,
+		ActiveConnections:    activeConnectionCount,
+		TotalConnections:     data.TotalConnections,
 		UptimeSeconds:        uptime.Seconds(),
 	}
 	
 	// Calculate traffic rates
 	if uptime.Seconds() > 0 {
 		data.TrafficStats.BytesPerSecond = int64(float64(data.TrafficStats.TotalDataTransferred) / uptime.Seconds())
-		data.TrafficStats.ConnectionsPerMinute = int64(float64(totalConnections) / uptime.Minutes())
+		data.TrafficStats.ConnectionsPerMinute = int64(float64(data.TotalConnections) / uptime.Minutes())
 	}
 	
 	return data
