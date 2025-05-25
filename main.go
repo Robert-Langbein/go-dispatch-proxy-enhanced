@@ -82,6 +82,9 @@ var mutex *sync.Mutex
 // Configuration file for source IP rules
 var config_file string = "source_ip_rules.json"
 
+// Global debug flag
+var debug_mode bool = false
+
 // Real-time connection tracking
 var active_connections map[string]*active_connection
 var connection_mutex *sync.RWMutex
@@ -721,6 +724,7 @@ func main() {
 	var stats = flag.Bool("stats", false, "Show load balancer statistics and exit")
 	var configFile = flag.String("config", "source_ip_rules.json", "Configuration file for source IP rules")
 	var webPort = flag.Int("web", 0, "Enable web GUI on specified port (0 = disabled, 80 = recommended)")
+	var debug = flag.Bool("debug", false, "Enable detailed debug logging")
 
 	flag.Parse()
 	
@@ -738,6 +742,12 @@ func main() {
 		load_source_ip_rules()
 		get_load_balancer_stats()
 		return
+	}
+
+	// Enable debug logging if requested
+	if *debug {
+		debug_mode = true
+		log.Printf("[DEBUG] Debug mode enabled")
 	}
 
 	// Disable timestamp in log messages
@@ -761,6 +771,7 @@ func main() {
 
 	// Start web server if enabled
 	if *webPort > 0 {
+		log.Printf("[INFO] Starting web server on port %d", *webPort)
 		startWebServer(*webPort)
 	}
 
@@ -783,6 +794,11 @@ func main() {
 		}
 		log.Printf("[INFO] LB %d: %s (%s) - Default ratio: %d, Custom rules: %d, Status: %s", 
 			i+1, lb.address, lb.iface, lb.contention_ratio, custom_rules, status)
+	}
+	
+	if *debug {
+		log.Printf("[DEBUG] Available network interfaces:")
+		detect_interfaces()
 	}
 	
 	defer l.Close()

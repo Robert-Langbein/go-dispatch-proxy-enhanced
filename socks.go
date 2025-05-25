@@ -73,6 +73,8 @@ func client_conection_request(conn net.Conn) (string, error) {
 		return "", errors.New("[WARN] unsupported command code")
 	}
 
+	log.Printf("[DEBUG] SOCKS5 request: version=%d, cmd=%d, addr_type=%d", socks_version, cmd_code, address_type)
+	
 	switch address_type {
 	case IPV4:
 		ipv4_address := make([]byte, 4)
@@ -88,11 +90,15 @@ func client_conection_request(conn net.Conn) (string, error) {
 			conn.Close()
 			return "", errors.New("[WARN] client connection request failed")
 		}
-		address = fmt.Sprintf("%d.%d.%d.%d:%d", ipv4_address[0],
-			ipv4_address[1],
-			ipv4_address[2],
-			ipv4_address[3],
-			binary.BigEndian.Uint16(port))
+		ipStr := fmt.Sprintf("%d.%d.%d.%d", ipv4_address[0], ipv4_address[1], ipv4_address[2], ipv4_address[3])
+		port_num := binary.BigEndian.Uint16(port)
+		
+		// Log suspicious addresses for debugging
+		if ipStr == "0.0.0.0" {
+			log.Printf("[DEBUG] Received suspicious IPv4 address: %s:%d", ipStr, port_num)
+		}
+		
+		address = fmt.Sprintf("%s:%d", ipStr, port_num)
 
 	case DOMAIN:
 		domain_name_length := make([]byte, 1)
@@ -135,7 +141,16 @@ func client_conection_request(conn net.Conn) (string, error) {
 		
 		// Format IPv6 address
 		ip := net.IP(ipv6_address)
-		address = fmt.Sprintf("[%s]:%d", ip.String(), binary.BigEndian.Uint16(port))
+		ipStr := ip.String()
+		
+		// Check for invalid IPv6 addresses
+		if ipStr == "::" || ipStr == "::1" {
+			conn.Write([]byte{5, HOST_UNREACHABLE, 0, 1, 0, 0, 0, 0, 0, 0})
+			conn.Close()
+			return "", errors.New("[WARN] invalid IPv6 address: " + ipStr)
+		}
+		
+		address = fmt.Sprintf("[%s]:%d", ipStr, binary.BigEndian.Uint16(port))
 
 	default:
 		conn.Write([]byte{5, ADDRTYPE_NOT_SUPPORTED, 0, 1, 0, 0, 0, 0, 0, 0})
