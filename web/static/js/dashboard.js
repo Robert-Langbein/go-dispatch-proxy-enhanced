@@ -4,6 +4,37 @@
 let autoRefreshInterval;
 let trafficRefreshInterval;
 
+// Chart variables
+let trafficChart;
+let chartInitialized = false;
+let chartData = {
+    labels: [],
+    datasets: [
+        {
+            label: 'Download Speed',
+            data: [],
+            borderColor: 'rgb(0, 184, 169)',
+            backgroundColor: 'rgba(0, 184, 169, 0.1)',
+            tension: 0.4,
+            fill: true,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            borderWidth: 2
+        },
+        {
+            label: 'Upload Speed',
+            data: [],
+            borderColor: 'rgb(220, 38, 38)',
+            backgroundColor: 'rgba(220, 38, 38, 0.1)',
+            tension: 0.4,
+            fill: true,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            borderWidth: 2
+        }
+    ]
+};
+
 function startAutoRefresh() {
     autoRefreshInterval = setInterval(() => {
         // Only refresh if user is not actively interacting
@@ -170,6 +201,8 @@ function updateTrafficData() {
                 const bitsRate = formatBits(data.bytes_per_second * 8) + 'bit/s';
                 bytesPerSecondEl.innerHTML = bytesRate + '<br><small class="speed-bits">' + bitsRate + '</small>';
             }
+            
+            // Note: Separate upload/download speeds are now updated in updateTrafficChart()
             if (totalDataTransferredEl) totalDataTransferredEl.textContent = formatBytes(data.total_data_transferred);
             if (activeConnectionsEl) activeConnectionsEl.textContent = data.active_connections;
             if (connectionsPerMinuteEl) connectionsPerMinuteEl.textContent = data.connections_per_minute;
@@ -216,9 +249,10 @@ function startTrafficRefresh() {
     trafficRefreshInterval = setInterval(() => {
         if (document.visibilityState === 'visible') {
             updateTrafficData();
+            updateTrafficChart();
             refreshConnections();
         }
-    }, 1000); // Update every 1 second for real-time feel
+    }, 500); // Update every 0.5 seconds for real-time feel
 }
 
 function stopTrafficRefresh() {
@@ -420,9 +454,208 @@ async function removeSourceIPRule(lbAddress, sourceIP) {
 }
 
 // Form Submissions
+// Initialize Traffic Chart
+function initializeTrafficChart() {
+    const ctx = document.getElementById('trafficChart');
+    if (!ctx || chartInitialized) {
+        console.log('Traffic chart canvas not found or already initialized');
+        return;
+    }
+    
+    try {
+        // Destroy existing chart if any
+        if (trafficChart) {
+            trafficChart.destroy();
+        }
+        
+        trafficChart = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: {
+                    duration: 0 // Disable animations for real-time updates
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Real-time Upload/Download Speeds',
+                        color: '#f8fafc',
+                        font: {
+                            size: 16
+                        }
+                    },
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            color: '#f8fafc',
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Time (seconds ago)',
+                            color: '#94a3b8'
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        },
+                        ticks: {
+                            color: '#94a3b8',
+                            stepSize: 10,
+                            callback: function(value) {
+                                const seconds = Math.floor((60 - value) / 2); // Convert index to seconds ago
+                                return seconds + 's';
+                            }
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Speed (MB/s)',
+                            color: '#94a3b8'
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        },
+                        ticks: {
+                            color: '#94a3b8',
+                            callback: function(value) {
+                                if (value === 0) return '0';
+                                if (value < 1) return (value * 1000).toFixed(0) + ' KB/s';
+                                return value.toFixed(1) + ' MB/s';
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                },
+                elements: {
+                    point: {
+                        radius: 0,
+                        hoverRadius: 4
+                    }
+                }
+            }
+        });
+        
+        chartInitialized = true;
+        console.log('Traffic chart initialized successfully');
+    } catch (error) {
+        console.error('Error initializing traffic chart:', error);
+        chartInitialized = false;
+    }
+}
+
+// Update Traffic Chart and separate speeds
+function updateTrafficChart() {
+    fetch('/api/traffic')
+        .then(response => response.json())
+        .then(data => {
+            // Update separate upload/download speeds in real-time
+            updateSeparateSpeedDisplays(data);
+            
+            // Update chart if available
+            if (trafficChart) {
+                updateChartData(data);
+            }
+        })
+        .catch(error => {
+            console.error('Error updating traffic data:', error);
+        });
+}
+
+// Update separate speed displays
+function updateSeparateSpeedDisplays(data) {
+    const bytesInPerSecondEl = document.getElementById('bytesInPerSecond');
+    const bytesOutPerSecondEl = document.getElementById('bytesOutPerSecond');
+    
+    if (bytesInPerSecondEl && data.bytes_in_per_second !== undefined) {
+        const bytesInRate = formatBytes(data.bytes_in_per_second) + '/s';
+        const bitsInRate = formatBits(data.bytes_in_per_second * 8) + 'bit/s';
+        bytesInPerSecondEl.innerHTML = bytesInRate + '<small class="speed-bits">' + bitsInRate + '</small>';
+    }
+    
+    if (bytesOutPerSecondEl && data.bytes_out_per_second !== undefined) {
+        const bytesOutRate = formatBytes(data.bytes_out_per_second) + '/s';
+        const bitsOutRate = formatBits(data.bytes_out_per_second * 8) + 'bit/s';
+        bytesOutPerSecondEl.innerHTML = bytesOutRate + '<small class="speed-bits">' + bitsOutRate + '</small>';
+    }
+}
+
+// Update chart data
+function updateChartData(data) {
+    if (!trafficChart || !chartInitialized) {
+        console.log('Chart not initialized, skipping update');
+        return;
+    }
+    
+    // Convert bytes to MB for chart display
+    const downloadSpeedMB = (data.bytes_in_per_second || 0) / (1024 * 1024);
+    const uploadSpeedMB = (data.bytes_out_per_second || 0) / (1024 * 1024);
+    
+    // Add new data point
+    const dataIndex = chartData.labels.length;
+    chartData.labels.push(dataIndex);
+    chartData.datasets[0].data.push(downloadSpeedMB);
+    chartData.datasets[1].data.push(uploadSpeedMB);
+    
+    // Keep only last 60 data points (30 seconds at 0.5s intervals)
+    const maxPoints = 60;
+    if (chartData.labels.length > maxPoints) {
+        chartData.labels.shift();
+        chartData.datasets[0].data.shift();
+        chartData.datasets[1].data.shift();
+        
+        // Reindex labels for proper display
+        for (let i = 0; i < chartData.labels.length; i++) {
+            chartData.labels[i] = i;
+        }
+    }
+    
+    // Update chart without animation for real-time feel
+    try {
+        trafficChart.update('none');
+    } catch (error) {
+        console.error('Error updating chart:', error);
+        // Try to reinitialize on error
+        chartInitialized = false;
+        setTimeout(() => {
+            initializeTrafficChart();
+        }, 1000);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('Dashboard DOM loaded, initializing...');
+    
     // Initialize theme first
     initializeTheme();
+    
+    // Wait for Chart.js to be fully loaded
+    if (typeof Chart !== 'undefined') {
+        console.log('Chart.js is available, initializing chart...');
+        initializeTrafficChart();
+    } else {
+        console.log('Chart.js not yet available, waiting...');
+        setTimeout(() => {
+            if (typeof Chart !== 'undefined') {
+                initializeTrafficChart();
+            } else {
+                console.error('Chart.js failed to load');
+            }
+        }, 1000);
+    }
     // Add Rule Form
     const addRuleForm = document.getElementById('addRuleForm');
     if (addRuleForm) {

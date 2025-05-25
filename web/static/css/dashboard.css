@@ -581,6 +581,8 @@ input:checked + .toggle-slider:before {
 .traffic-card.data::before { background: var(--unifi-info); }
 .traffic-card.connections::before { background: var(--unifi-warning); }
 .traffic-card.rate::before { background: var(--unifi-blue); }
+.traffic-card.download::before { background: var(--unifi-success); }
+.traffic-card.upload::before { background: var(--unifi-danger); }
 
 .traffic-card:hover {
     transform: translateY(-1px);
@@ -624,6 +626,30 @@ input:checked + .toggle-slider:before {
     font-size: 13px;
     color: var(--unifi-text-secondary);
     font-weight: 500;
+}
+
+/* Traffic Chart */
+.traffic-chart-section {
+    margin-top: 24px;
+    background: var(--unifi-secondary-bg);
+    border: 1px solid var(--unifi-border);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: var(--unifi-shadow);
+}
+
+.chart-container {
+    position: relative;
+    height: 300px;
+    margin-top: 16px;
+    background: var(--unifi-dark-navy);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.chart-container canvas {
+    width: 100% !important;
+    height: 100% !important;
 }
 
 /* Traffic Distribution */

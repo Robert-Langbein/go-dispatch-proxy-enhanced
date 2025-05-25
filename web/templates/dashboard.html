@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="/static/css/main.css">
     <link rel="stylesheet" href="/static/css/dashboard.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.js"></script>
 </head>
 <body>
     <!-- Top Navigation -->
@@ -179,7 +180,7 @@
                                 {{formatBytes .TrafficStats.BytesPerSecond}}/s
                                 <small class="speed-bits">0 bit/s</small>
                             </div>
-                            <div class="traffic-label">Transfer Rate</div>
+                            <div class="traffic-label">Combined Rate</div>
                         </div>
                     </div>
                     <div class="traffic-card data">
@@ -208,6 +209,38 @@
                             <div class="traffic-value" id="connectionsPerMinute">{{.TrafficStats.ConnectionsPerMinute}}</div>
                             <div class="traffic-label">Connections/min</div>
                         </div>
+                    </div>
+                    <div class="traffic-card download">
+                        <div class="traffic-icon">
+                            <i class="fas fa-download"></i>
+                        </div>
+                        <div class="traffic-content">
+                            <div class="traffic-value" id="bytesInPerSecond">
+                                {{formatBytes .TrafficStats.BytesInPerSecond}}/s
+                                <small class="speed-bits">0 bit/s</small>
+                            </div>
+                            <div class="traffic-label">Download Speed</div>
+                        </div>
+                    </div>
+                    <div class="traffic-card upload">
+                        <div class="traffic-icon">
+                            <i class="fas fa-upload"></i>
+                        </div>
+                        <div class="traffic-content">
+                            <div class="traffic-value" id="bytesOutPerSecond">
+                                {{formatBytes .TrafficStats.BytesOutPerSecond}}/s
+                                <small class="speed-bits">0 bit/s</small>
+                            </div>
+                            <div class="traffic-label">Upload Speed</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Real-time Traffic Chart -->
+                <div class="traffic-chart-section">
+                    <h3><i class="fas fa-chart-line"></i> Real-time Traffic Chart (Last 30 seconds)</h3>
+                    <div class="chart-container">
+                        <canvas id="trafficChart" width="800" height="300"></canvas>
                     </div>
                 </div>
                 
