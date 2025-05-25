@@ -22,18 +22,20 @@ body {
 .login-container {
     display: flex;
     width: 100%;
-    max-width: 1200px;
+    max-width: 900px;
     min-height: 600px;
     background-color: var(--unifi-bg-primary);
     border-radius: var(--unifi-radius-lg);
     box-shadow: var(--unifi-shadow-xl);
     overflow: hidden;
+    margin: 0 auto;
 }
 
 /* Left Side - Login Form */
 .login-form-section {
     flex: 1;
-    max-width: 500px;
+    min-width: 400px;
+    max-width: 450px;
     padding: var(--unifi-space-8);
     display: flex;
     align-items: center;
@@ -454,8 +456,13 @@ body {
 @media (max-width: 1024px) {
     .login-container {
         flex-direction: column;
-        max-width: 500px;
+        max-width: 600px;
         min-height: auto;
+    }
+    
+    .login-form-section {
+        min-width: auto;
+        max-width: none;
     }
     
     .login-background-section {

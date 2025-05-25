@@ -532,6 +532,35 @@ input:disabled + .toggle-slider {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     border-bottom: 1px solid var(--unifi-border-primary);
+    position: relative;
+}
+
+.data-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.data-table th.sortable:hover {
+    background-color: var(--unifi-bg-overlay);
+}
+
+.sort-indicator {
+    position: absolute;
+    right: var(--unifi-space-2);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--unifi-text-tertiary);
+    font-size: var(--unifi-font-size-xs);
+    transition: color 0.2s ease;
+}
+
+.data-table th.sortable:hover .sort-indicator {
+    color: var(--unifi-text-secondary);
+}
+
+.data-table th.sorted .sort-indicator {
+    color: var(--unifi-blue-primary);
 }
 
 .data-table td {
@@ -569,7 +598,7 @@ input:disabled + .toggle-slider {
     gap: var(--unifi-space-3);
 }
 
-/* Modals */
+/* Modals - Fixed centering */
 .modal {
     display: none;
     position: fixed;
@@ -580,12 +609,12 @@ input:disabled + .toggle-slider {
     height: 100%;
     background-color: rgba(33, 35, 39, 0.5);
     backdrop-filter: blur(4px);
-    align-items: center;
-    justify-content: center;
 }
 
 .modal.show {
     display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .modal-content {
@@ -599,6 +628,7 @@ input:disabled + .toggle-slider {
     overflow: hidden;
     animation: modalSlideIn 0.2s ease;
     outline: none;
+    margin: auto;
 }
 
 @keyframes modalSlideIn {

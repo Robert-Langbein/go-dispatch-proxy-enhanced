@@ -3,6 +3,11 @@
 // Auto-refresh functionality
 let autoRefreshInterval;
 let trafficRefreshInterval;
+let connectionsRefreshInterval;
+
+// Table sorting state
+let currentSortColumn = null;
+let currentSortDirection = 'asc';
 
 // Chart variables
 let trafficChart;
@@ -34,6 +39,192 @@ let chartData = {
         }
     ]
 };
+
+// Table sorting functionality
+function initializeTableSorting() {
+    // Add sorting to all tables with sortable headers
+    const tables = document.querySelectorAll('.data-table');
+    
+    tables.forEach(table => {
+        // Skip if already initialized
+        if (table.hasAttribute('data-sorting-initialized')) {
+            return;
+        }
+        
+        const headers = table.querySelectorAll('th');
+        headers.forEach((header, index) => {
+            // Skip action columns (usually last column)
+            if (!header.textContent.toLowerCase().includes('actions')) {
+                header.classList.add('sortable');
+                
+                // Add sort indicator if not exists
+                if (!header.querySelector('.sort-indicator')) {
+                    const sortIndicator = document.createElement('span');
+                    sortIndicator.className = 'sort-indicator';
+                    sortIndicator.innerHTML = '<i class="fas fa-sort"></i>';
+                    header.appendChild(sortIndicator);
+                }
+                
+                // Add event listener
+                header.addEventListener('click', () => {
+                    sortTable(table, index, header);
+                });
+            }
+        });
+        
+        // Mark table as initialized
+        table.setAttribute('data-sorting-initialized', 'true');
+    });
+}
+
+function sortTable(table, columnIndex, header) {
+    // Determine sort direction
+    let direction = 'asc';
+    if (currentSortColumn === columnIndex && currentSortDirection === 'asc') {
+        direction = 'desc';
+    }
+    
+    // Update sort state
+    currentSortColumn = columnIndex;
+    currentSortDirection = direction;
+    
+    // Remove sorted class from all headers and reset indicators
+    table.querySelectorAll('th').forEach(th => {
+        th.classList.remove('sorted');
+        const indicator = th.querySelector('.sort-indicator');
+        if (indicator) {
+            indicator.innerHTML = '<i class="fas fa-sort"></i>';
+        }
+    });
+    
+    // Add sorted class to current header and update indicator
+    header.classList.add('sorted');
+    const sortIndicator = header.querySelector('.sort-indicator');
+    if (direction === 'asc') {
+        sortIndicator.innerHTML = '<i class="fas fa-sort-up"></i>';
+    } else {
+        sortIndicator.innerHTML = '<i class="fas fa-sort-down"></i>';
+    }
+    
+    // Apply the sort
+    applySortToTable(table, columnIndex, header, direction);
+}
+
+function applySortToTable(table, columnIndex, header, direction) {
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    
+    // Sort rows
+    rows.sort((a, b) => {
+        const aCell = a.cells[columnIndex];
+        const bCell = b.cells[columnIndex];
+        
+        let aValue = getCellValue(aCell);
+        let bValue = getCellValue(bCell);
+        
+        // Handle different data types
+        if (isNumeric(aValue) && isNumeric(bValue)) {
+            aValue = parseFloat(aValue);
+            bValue = parseFloat(bValue);
+        } else if (isDate(aValue) && isDate(bValue)) {
+            aValue = new Date(aValue);
+            bValue = new Date(bValue);
+        } else {
+            aValue = aValue.toLowerCase();
+            bValue = bValue.toLowerCase();
+        }
+        
+        if (direction === 'asc') {
+            return aValue > bValue ? 1 : aValue < bValue ? -1 : 0;
+        } else {
+            return aValue < bValue ? 1 : aValue > bValue ? -1 : 0;
+        }
+    });
+    
+    // Re-append sorted rows
+    rows.forEach(row => tbody.appendChild(row));
+}
+
+function getCellValue(cell) {
+    // Extract text content, handling nested elements
+    let value = cell.textContent || cell.innerText || '';
+    
+    // Clean up common patterns
+    value = value.replace(/^\s+|\s+$/g, ''); // trim
+    
+    // Handle specific patterns
+    if (value.includes('LB')) {
+        // Extract LB number for load balancer sorting
+        const match = value.match(/LB(\d+)/);
+        return match ? parseInt(match[1]) : 0;
+    }
+    
+    if (value.includes('%')) {
+        // Extract percentage value
+        return parseFloat(value.replace('%', ''));
+    }
+    
+    if (value.match(/\d+(\.\d+)?\s*(B|KB|MB|GB|TB)/i)) {
+        // Convert bytes to numeric value for sorting
+        return convertBytesToNumber(value);
+    }
+    
+    // Handle IP addresses for proper sorting
+    if (value.match(/^\d+\.\d+\.\d+\.\d+/)) {
+        const parts = value.split('.').map(part => parseInt(part.split(':')[0]));
+        return parts[0] * 16777216 + parts[1] * 65536 + parts[2] * 256 + parts[3];
+    }
+    
+    // Handle duration formats (e.g., "2m 30s", "1h 5m")
+    if (value.match(/\d+[hms]/)) {
+        let totalSeconds = 0;
+        const hours = value.match(/(\d+)h/);
+        const minutes = value.match(/(\d+)m/);
+        const seconds = value.match(/(\d+)s/);
+        
+        if (hours) totalSeconds += parseInt(hours[1]) * 3600;
+        if (minutes) totalSeconds += parseInt(minutes[1]) * 60;
+        if (seconds) totalSeconds += parseInt(seconds[1]);
+        
+        return totalSeconds;
+    }
+    
+    // Handle numeric values
+    const numericMatch = value.match(/^[\d,]+(\.\d+)?/);
+    if (numericMatch) {
+        return parseFloat(numericMatch[0].replace(/,/g, ''));
+    }
+    
+    return value.toLowerCase();
+}
+
+function isNumeric(value) {
+    return !isNaN(parseFloat(value)) && isFinite(value);
+}
+
+function isDate(value) {
+    return !isNaN(Date.parse(value));
+}
+
+function convertBytesToNumber(bytesString) {
+    const units = {
+        'B': 1,
+        'KB': 1024,
+        'MB': 1024 * 1024,
+        'GB': 1024 * 1024 * 1024,
+        'TB': 1024 * 1024 * 1024 * 1024
+    };
+    
+    // Handle various formats like "1.5 MB", "1024B", "2.3 GB"
+    const match = bytesString.match(/([\d.,]+)\s*([KMGT]?B)/i);
+    if (match) {
+        const value = parseFloat(match[1].replace(/,/g, ''));
+        const unit = match[2].toUpperCase();
+        return value * (units[unit] || 1);
+    }
+    
+    return 0;
+}
 
 function startAutoRefresh() {
     autoRefreshInterval = setInterval(() => {
@@ -144,6 +335,21 @@ function updateConnectionsTable(connections) {
     const tbody = document.getElementById('connectionsBody');
     if (!tbody) return;
     
+    // Store current sort state before updating
+    const table = tbody.closest('table');
+    const currentSortedHeader = table ? table.querySelector('th.sorted') : null;
+    let sortColumnIndex = -1;
+    let sortDirection = 'asc';
+    
+    if (currentSortedHeader) {
+        const headers = Array.from(table.querySelectorAll('th'));
+        sortColumnIndex = headers.indexOf(currentSortedHeader);
+        const sortIndicator = currentSortedHeader.querySelector('.sort-indicator i');
+        if (sortIndicator && sortIndicator.classList.contains('fa-sort-down')) {
+            sortDirection = 'desc';
+        }
+    }
+    
     tbody.innerHTML = '';
     
     connections.forEach(conn => {
@@ -206,6 +412,18 @@ function updateConnectionsTable(connections) {
         
         tbody.appendChild(row);
     });
+    
+    // Initialize table sorting if not already done
+    if (table && !table.hasAttribute('data-sorting-initialized')) {
+        initializeTableSorting();
+    }
+    
+    // Restore sort state if it existed
+    if (sortColumnIndex >= 0 && currentSortedHeader) {
+        currentSortColumn = sortColumnIndex;
+        currentSortDirection = sortDirection;
+        applySortToTable(table, sortColumnIndex, currentSortedHeader, sortDirection);
+    }
 }
 
 // Enhanced auto-refresh with traffic data
@@ -266,14 +484,23 @@ function startTrafficRefresh() {
         if (document.visibilityState === 'visible') {
             updateTrafficData();
             updateTrafficChart();
-            refreshConnections();
         }
     }, 500); // Update every 0.5 seconds for real-time feel
+    
+    // Separate interval for connections to avoid disrupting sorting
+    connectionsRefreshInterval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+            refreshConnections();
+        }
+    }, 3000); // Update connections every 3 seconds
 }
 
 function stopTrafficRefresh() {
     if (trafficRefreshInterval) {
         clearInterval(trafficRefreshInterval);
+    }
+    if (connectionsRefreshInterval) {
+        clearInterval(connectionsRefreshInterval);
     }
 }
 
@@ -324,6 +551,7 @@ function showModal(modalId) {
     if (modal) {
         modal.style.display = 'block';
         stopAutoRefresh(); // Pause auto-refresh while modal is open
+        stopTrafficRefresh(); // Also pause traffic refresh
     }
 }
 
@@ -332,6 +560,7 @@ function closeModal(modalId) {
     if (modal) {
         modal.style.display = 'none';
         startAutoRefresh(); // Resume auto-refresh
+        startTrafficRefresh(); // Resume traffic refresh
     }
 }
 
@@ -798,6 +1027,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize theme first
     initializeTheme();
     
+    // Initialize table sorting
+    initializeTableSorting();
+    
     // Wait for Chart.js to be fully loaded
     if (typeof Chart !== 'undefined') {
         console.log('Chart.js is available, initializing chart...');
@@ -896,5 +1128,6 @@ window.addEventListener('click', function(event) {
     if (event.target.classList.contains('modal')) {
         event.target.style.display = 'none';
         startAutoRefresh();
+        startTrafficRefresh();
     }
 }); 
