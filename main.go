@@ -13,12 +13,39 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 type source_ip_rule struct {
 	SourceIP         string `json:"source_ip"`
 	ContentionRatio  int    `json:"contention_ratio"`
 	Description      string `json:"description"`
+}
+
+// Real-time connection tracking structure
+type active_connection struct {
+	ID              string    `json:"id"`
+	SourceIP        string    `json:"source_ip"`
+	SourcePort      int       `json:"source_port"`
+	DestinationIP   string    `json:"destination_ip"`
+	DestinationPort int       `json:"destination_port"`
+	LoadBalancer    string    `json:"load_balancer"`
+	LBIndex         int       `json:"lb_index"`
+	StartTime       time.Time `json:"start_time"`
+	LastActivity    time.Time `json:"last_activity"`
+	BytesIn         int64     `json:"bytes_in"`
+	BytesOut        int64     `json:"bytes_out"`
+	Status          string    `json:"status"` // "active", "closing", "closed"
+	Protocol        string    `json:"protocol"`
+	ProcessInfo     string    `json:"process_info,omitempty"` // Optional process information
+}
+
+// Traffic statistics for real-time monitoring
+type traffic_stats struct {
+	BytesPerSecond    int64 `json:"bytes_per_second"`
+	ConnectionsPerMin int64 `json:"connections_per_min"`
+	LastUpdate        time.Time `json:"last_update"`
 }
 
 type enhanced_load_balancer struct {
@@ -33,6 +60,11 @@ type enhanced_load_balancer struct {
 	success_count       int                        // successful connections
 	failure_count       int                        // failed connections
 	enabled             bool                       // whether this LB is enabled
+	
+	// Real-time traffic monitoring
+	traffic_stats       traffic_stats              // current traffic statistics
+	bytes_transferred   int64                      // total bytes transferred
+	last_traffic_update time.Time                  // last traffic update timestamp
 }
 
 // The load balancer used in the previous connection (global round robin)
@@ -49,6 +81,27 @@ var mutex *sync.Mutex
 
 // Configuration file for source IP rules
 var config_file string = "source_ip_rules.json"
+
+// Real-time connection tracking
+var active_connections map[string]*active_connection
+var connection_mutex *sync.RWMutex
+var connection_history []active_connection
+var max_connections int = 500 // Performance limit
+
+// Global traffic statistics
+var global_bytes_in int64
+var global_bytes_out int64
+var global_start_time time.Time
+
+// Performance counters
+var total_data_transferred int64
+
+func init() {
+	active_connections = make(map[string]*active_connection)
+	connection_mutex = &sync.RWMutex{}
+	connection_history = make([]active_connection, 0, max_connections)
+	global_start_time = time.Now()
+}
 
 /*
 Load source IP rules from configuration file
@@ -239,32 +292,236 @@ func get_enhanced_load_balancer(source_ip string, params ...interface{}) (*enhan
 	return lb, ilb
 }
 
+// Legacy get_load_balancer function removed - use get_enhanced_load_balancer instead
+
 /*
-Backward compatibility: Get a load balancer according to contention ratio (legacy function)
+Generate unique connection ID
 */
-func get_load_balancer(params ...interface{}) (*enhanced_load_balancer, int) {
-	return get_enhanced_load_balancer("", params...)
+func generate_connection_id() string {
+	return fmt.Sprintf("conn_%d_%d", time.Now().UnixNano(), len(active_connections))
 }
 
 /*
-Joins the local and remote connections together
+Add new active connection to tracking
 */
-func pipe_connections(local_conn, remote_conn net.Conn) {
+func add_active_connection(conn net.Conn, remote_addr string, lb *enhanced_load_balancer, lb_index int) string {
+	connection_mutex.Lock()
+	defer connection_mutex.Unlock()
+	
+	// Clean up old connections if we hit the limit
+	if len(active_connections) >= max_connections {
+		cleanup_old_connections()
+	}
+	
+	conn_id := generate_connection_id()
+	source_ip := get_source_ip(conn)
+	source_port := 0
+	dest_ip := ""
+	dest_port := 0
+	
+	// Extract port from source
+	if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		source_port = addr.Port
+	}
+	
+	// Extract destination info
+	if strings.Contains(remote_addr, ":") {
+		parts := strings.Split(remote_addr, ":")
+		dest_ip = parts[0]
+		if len(parts) > 1 {
+			dest_port, _ = strconv.Atoi(parts[1])
+		}
+	}
+	
+	active_conn := &active_connection{
+		ID:              conn_id,
+		SourceIP:        source_ip,
+		SourcePort:      source_port,
+		DestinationIP:   dest_ip,
+		DestinationPort: dest_port,
+		LoadBalancer:    lb.address,
+		LBIndex:         lb_index,
+		StartTime:       time.Now(),
+		LastActivity:    time.Now(),
+		BytesIn:         0,
+		BytesOut:        0,
+		Status:          "active",
+		Protocol:        "TCP",
+		ProcessInfo:     "", // Could be enhanced with process detection
+	}
+	
+	active_connections[conn_id] = active_conn
+	log.Printf("[DEBUG] Added active connection %s: %s:%d -> %s:%d via LB%d", 
+		conn_id, source_ip, source_port, dest_ip, dest_port, lb_index+1)
+	
+	return conn_id
+}
+
+/*
+Update connection traffic statistics
+*/
+func update_connection_traffic(conn_id string, bytes_in, bytes_out int64) {
+	connection_mutex.Lock()
+	defer connection_mutex.Unlock()
+	
+	if conn, exists := active_connections[conn_id]; exists {
+		conn.BytesIn += bytes_in
+		conn.BytesOut += bytes_out
+		conn.LastActivity = time.Now()
+		
+		// Update global counters
+		atomic.AddInt64(&global_bytes_in, bytes_in)
+		atomic.AddInt64(&global_bytes_out, bytes_out)
+		atomic.AddInt64(&total_data_transferred, bytes_in+bytes_out)
+		
+		// Update load balancer traffic stats
+		if lb_index := conn.LBIndex; lb_index >= 0 && lb_index < len(lb_list) {
+			mutex.Lock()
+			lb_list[lb_index].bytes_transferred += bytes_in + bytes_out
+			lb_list[lb_index].last_traffic_update = time.Now()
+			mutex.Unlock()
+		}
+	}
+}
+
+/*
+Remove active connection from tracking
+*/
+func remove_active_connection(conn_id string) {
+	connection_mutex.Lock()
+	defer connection_mutex.Unlock()
+	
+	if conn, exists := active_connections[conn_id]; exists {
+		conn.Status = "closed"
+		
+		// Add to history with limit check
+		if len(connection_history) >= max_connections {
+			// Remove oldest entry
+			connection_history = connection_history[1:]
+		}
+		connection_history = append(connection_history, *conn)
+		
+		delete(active_connections, conn_id)
+		log.Printf("[DEBUG] Removed active connection %s after %v", 
+			conn_id, time.Since(conn.StartTime))
+	}
+}
+
+/*
+Cleanup old connections (performance optimization)
+*/
+func cleanup_old_connections() {
+	cutoff := time.Now().Add(-5 * time.Minute) // Remove connections older than 5 minutes
+	removed := 0
+	
+	for id, conn := range active_connections {
+		if conn.LastActivity.Before(cutoff) || conn.Status == "closed" {
+			delete(active_connections, id)
+			removed++
+		}
+	}
+	
+	if removed > 0 {
+		log.Printf("[INFO] Cleaned up %d old connections", removed)
+	}
+}
+
+/*
+Get current active connections (with filters)
+*/
+func get_active_connections(source_filter, destination_filter string, limit int) []active_connection {
+	connection_mutex.RLock()
+	defer connection_mutex.RUnlock()
+	
+	result := make([]active_connection, 0, len(active_connections))
+	count := 0
+	
+	for _, conn := range active_connections {
+		// Apply filters
+		if source_filter != "" && !strings.Contains(conn.SourceIP, source_filter) {
+			continue
+		}
+		if destination_filter != "" && !strings.Contains(conn.DestinationIP, destination_filter) {
+			continue
+		}
+		
+		result = append(result, *conn)
+		count++
+		
+		if limit > 0 && count >= limit {
+			break
+		}
+	}
+	
+	return result
+}
+
+/*
+Custom io.Copy with traffic monitoring
+*/
+func monitored_copy(dst io.Writer, src io.Reader, conn_id string, direction string) (int64, error) {
+	buffer := make([]byte, 32*1024) // 32KB buffer for performance
+	var total int64
+	
+	for {
+		nr, er := src.Read(buffer)
+		if nr > 0 {
+			nw, ew := dst.Write(buffer[0:nr])
+			if nw < 0 || nr < nw {
+				nw = 0
+				if ew == nil {
+					ew = fmt.Errorf("invalid write result")
+				}
+			}
+			
+			total += int64(nw)
+			
+			// Update traffic statistics
+			if direction == "in" {
+				update_connection_traffic(conn_id, int64(nw), 0)
+			} else {
+				update_connection_traffic(conn_id, 0, int64(nw))
+			}
+			
+			if ew != nil {
+				return total, ew
+			}
+			if nr != nw {
+				return total, io.ErrShortWrite
+			}
+		}
+		if er != nil {
+			if er != io.EOF {
+				return total, er
+			}
+			break
+		}
+	}
+	return total, nil
+}
+
+/*
+Enhanced pipe connections with traffic monitoring
+*/
+func pipe_connections(local_conn, remote_conn net.Conn, conn_id string) {
 	go func() {
 		defer remote_conn.Close()
 		defer local_conn.Close()
-		_, err := io.Copy(remote_conn, local_conn)
+		defer remove_active_connection(conn_id)
+		
+		_, err := monitored_copy(remote_conn, local_conn, conn_id, "out")
 		if err != nil {
-			return
+			log.Printf("[DEBUG] Connection %s outbound error: %v", conn_id, err)
 		}
 	}()
 
 	go func() {
 		defer remote_conn.Close()
 		defer local_conn.Close()
-		_, err := io.Copy(local_conn, remote_conn)
+		
+		_, err := monitored_copy(local_conn, remote_conn, conn_id, "in")
 		if err != nil {
-			return
+			log.Printf("[DEBUG] Connection %s inbound error: %v", conn_id, err)
 		}
 	}()
 }
@@ -311,7 +568,10 @@ retry:
 
 	load_balancer.success_count++
 	log.Printf("[DEBUG] Tunnelled %s to %s LB: %d", source_ip, load_balancer.address, i)
-	pipe_connections(conn, remote_conn)
+	
+	// Add connection tracking for tunnel mode
+	conn_id := add_active_connection(conn, load_balancer.address, load_balancer, i)
+	pipe_connections(conn, remote_conn, conn_id)
 }
 
 /*

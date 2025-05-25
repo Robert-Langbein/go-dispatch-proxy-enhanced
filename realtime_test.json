@@ -1,0 +1,21 @@
+{
+  "192.168.1.100:8080": {
+    "192.168.1.10": {
+      "source_ip": "192.168.1.10",
+      "contention_ratio": 5,
+      "description": "High priority VIP client"
+    },
+    "10.0.0.0/24": {
+      "source_ip": "10.0.0.0/24",
+      "contention_ratio": 2,
+      "description": "Internal network traffic"
+    }
+  },
+  "192.168.1.101:8080": {
+    "192.168.1.20": {
+      "source_ip": "192.168.1.20",
+      "contention_ratio": 3,
+      "description": "Medium priority client"
+    }
+  }
+} 

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Dispatch Proxy Enhanced - Dashboard</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <h1>🚀 Go Dispatch Proxy Enhanced</h1>
+        </div>
+        <div class="nav-controls">
+            <span class="status online">● Online</span>
+            <a href="/logout" class="btn btn-secondary">Logout</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- System Overview -->
+        <div class="section">
+            <h2>📊 System Overview</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">{{.SystemInfo.TotalLBs}}</div>
+                    <div class="stat-label">Load Balancers</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">{{.TotalConnections}}</div>
+                    <div class="stat-label">Total Connections</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">{{printf "%.1f%%" .OverallSuccessRate}}</div>
+                    <div class="stat-label">Success Rate</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">{{.SystemInfo.Uptime}}</div>
+                    <div class="stat-label">Uptime</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Load Balancers -->
+        <div class="section">
+            <h2>⚖️ Load Balancers</h2>
+            <div class="lb-grid">
+                {{range .LoadBalancers}}
+                <div class="lb-card enabled">
+                    <div class="lb-header">
+                        <h3>LB {{.ID}}: {{.Address}}</h3>
+                        <span class="status">{{if .Enabled}}Enabled{{else}}Disabled{{end}}</span>
+                    </div>
+                    <div class="lb-info">
+                        <p><strong>Interface:</strong> {{.Interface}}</p>
+                        <p><strong>Default Ratio:</strong> {{.DefaultRatio}}</p>
+                        <p><strong>Success Rate:</strong> {{printf "%.1f%%" .SuccessRate}}</p>
+                    </div>
+                    <div class="lb-stats">
+                        <div class="stat-row">
+                            <span>Total: {{.TotalConnections}}</span>
+                            <span class="success">Success: {{.SuccessCount}}</span>
+                            <span class="error">Failures: {{.FailureCount}}</span>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+            </div>
+        </div>
+
+        <!-- Real-time Traffic Statistics -->
+        <div class="section">
+            <h2>📊 Real-time Traffic</h2>
+            <div class="traffic-stats">
+                <div class="traffic-grid">
+                    <div class="traffic-card">
+                        <div class="traffic-value">{{.TrafficStats.BytesPerSecond}}</div>
+                        <div class="traffic-label">Bytes/sec</div>
+                    </div>
+                    <div class="traffic-card">
+                        <div class="traffic-value">{{.TrafficStats.TotalDataTransferred}}</div>
+                        <div class="traffic-label">Total Data</div>
+                    </div>
+                    <div class="traffic-card">
+                        <div class="traffic-value">{{.TrafficStats.ActiveConnections}}</div>
+                        <div class="traffic-label">Active Connections</div>
+                    </div>
+                    <div class="traffic-card">
+                        <div class="traffic-value">{{.TrafficStats.ConnectionsPerMinute}}</div>
+                        <div class="traffic-label">Connections/min</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Connections -->
+        <div class="section">
+            <h2>🔗 Active Connections</h2>
+            <div class="connections-table">
+                {{if .ActiveConnections}}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Source</th>
+                            <th>Destination</th>
+                            <th>Load Balancer</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .ActiveConnections}}
+                        <tr>
+                            <td>{{.SourceIP}}:{{.SourcePort}}</td>
+                            <td>{{.DestinationIP}}:{{.DestinationPort}}</td>
+                            <td>LB{{.LBIndex}}</td>
+                            <td>{{.Status}}</td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+                {{else}}
+                <div class="no-connections">
+                    <p>No active connections</p>
+                </div>
+                {{end}}
+            </div>
+        </div>
+
+        <!-- Configuration -->
+        <div class="section">
+            <h2>⚙️ Configuration</h2>
+            <div class="config-info">
+                <p><strong>Version:</strong> {{.SystemInfo.Version}}</p>
+                <p><strong>Config File:</strong> {{.SystemInfo.ConfigFile}}</p>
+                <p><strong>Listen Address:</strong> {{.SystemInfo.ListenAddress}}</p>
+                <p><strong>Started:</strong> {{.SystemInfo.StartTime.Format "2006-01-02 15:04:05"}}</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Simple auto-refresh every 10 seconds
+        setInterval(function() {
+            location.reload();
+        }, 10000);
+    </script>
+</body>
+</html> 

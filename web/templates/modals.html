@@ -1,0 +1,64 @@
+<!-- Add Rule Modal -->
+<div id="addRuleModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal('addRuleModal')">&times;</span>
+        <h3>Add Source IP Rule</h3>
+        <form id="addRuleForm">
+            <input type="hidden" id="modalLBAddress" name="lb_address">
+            <div class="form-group">
+                <label for="sourceIP">Source IP/CIDR:</label>
+                <input type="text" id="sourceIP" name="source_ip" required 
+                       placeholder="192.168.1.100 or 10.0.0.0/24">
+            </div>
+            <div class="form-group">
+                <label for="contentionRatio">Contention Ratio:</label>
+                <input type="number" id="contentionRatio" name="contention_ratio" 
+                       min="1" max="100" value="1" required>
+            </div>
+            <div class="form-group">
+                <label for="description">Description:</label>
+                <input type="text" id="description" name="description" 
+                       placeholder="e.g., High priority client">
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addRuleModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Add Rule</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Set Weight Modal -->
+<div id="weightModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal('weightModal')">&times;</span>
+        <h3>Set Connection Weight</h3>
+        <form id="weightForm">
+            <input type="hidden" id="weightSourceIP" name="source_ip">
+            <input type="hidden" id="weightLBAddress" name="lb_address">
+            <div class="form-group">
+                <label>Source IP:</label>
+                <span id="weightSourceIPDisplay" class="readonly-field"></span>
+            </div>
+            <div class="form-group">
+                <label>Load Balancer:</label>
+                <span id="weightLBDisplay" class="readonly-field"></span>
+            </div>
+            <div class="form-group">
+                <label for="weightRatio">Contention Ratio:</label>
+                <input type="number" id="weightRatio" name="contention_ratio" 
+                       min="1" max="100" value="1" required>
+                <small>Higher values = more priority for this source IP</small>
+            </div>
+            <div class="form-group">
+                <label for="weightDescription">Description:</label>
+                <input type="text" id="weightDescription" name="description" 
+                       placeholder="e.g., VIP client high priority">
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('weightModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Set Weight</button>
+            </div>
+        </form>
+    </div>
+</div> 

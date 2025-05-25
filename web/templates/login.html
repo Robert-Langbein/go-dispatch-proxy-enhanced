@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Dispatch Proxy Enhanced - Login</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/login.css">
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <div class="login-box">
+            <h1>🚀 Go Dispatch Proxy Enhanced</h1>
+            <p>Enhanced Load Balancing Web Interface</p>
+            {{if .ErrorMsg}}
+            <div class="error">{{.ErrorMsg}}</div>
+            {{end}}
+            <form method="POST" action="/login">
+                <div class="form-group">
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" name="username" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password:</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Login</button>
+            </form>
+            <div class="info">
+                <small>Default credentials: admin/admin<br>
+                Set WEB_USERNAME and WEB_PASSWORD environment variables to customize</small>
+            </div>
+        </div>
+    </div>
+</body>
+</html> 

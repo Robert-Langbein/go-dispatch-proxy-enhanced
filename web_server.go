@@ -9,8 +9,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,13 +26,16 @@ type WebServer struct {
 }
 
 type DashboardData struct {
-	LoadBalancers    []LoadBalancerWebInfo `json:"load_balancers"`
-	TotalConnections int                   `json:"total_connections"`
-	TotalSuccess     int                   `json:"total_success"`
-	TotalFailures    int                   `json:"total_failures"`
-	OverallSuccessRate float64            `json:"overall_success_rate"`
-	ActiveSources    []SourceIPInfo        `json:"active_sources"`
-	SystemInfo       SystemInfo            `json:"system_info"`
+	LoadBalancers       []LoadBalancerWebInfo `json:"load_balancers"`
+	TotalConnections    int                   `json:"total_connections"`
+	TotalSuccess        int                   `json:"total_success"`
+	TotalFailures       int                   `json:"total_failures"`
+	OverallSuccessRate  float64              `json:"overall_success_rate"`
+	ActiveSources       []SourceIPInfo        `json:"active_sources"`
+	SystemInfo          SystemInfo            `json:"system_info"`
+	ActiveConnections   []active_connection   `json:"active_connections"`
+	ConnectionHistory   []active_connection   `json:"connection_history"`
+	TrafficStats        GlobalTrafficStats    `json:"traffic_stats"`
 }
 
 type LoadBalancerWebInfo struct {
@@ -61,6 +67,17 @@ type SystemInfo struct {
 	ListenAddress   string    `json:"listen_address"`
 	TotalLBs        int       `json:"total_lbs"`
 	StartTime       time.Time `json:"start_time"`
+}
+
+type GlobalTrafficStats struct {
+	TotalBytesIn        int64   `json:"total_bytes_in"`
+	TotalBytesOut       int64   `json:"total_bytes_out"`
+	TotalDataTransferred int64  `json:"total_data_transferred"`
+	BytesPerSecond      int64   `json:"bytes_per_second"`
+	ConnectionsPerMinute int64  `json:"connections_per_minute"`
+	ActiveConnections   int     `json:"active_connections"`
+	TotalConnections    int     `json:"total_connections"`
+	UptimeSeconds       float64 `json:"uptime_seconds"`
 }
 
 var (
@@ -110,6 +127,9 @@ func (ws *WebServer) Start() error {
 	http.HandleFunc("/api/config", ws.handleAPIConfig)
 	http.HandleFunc("/api/rules", ws.handleAPIRules)
 	http.HandleFunc("/api/lb/toggle", ws.handleAPIToggleLB)
+	http.HandleFunc("/api/connections", ws.handleAPIConnections)
+	http.HandleFunc("/api/traffic", ws.handleAPITraffic)
+	http.HandleFunc("/api/connection/weight", ws.handleAPIConnectionWeight)
 	http.HandleFunc("/static/", ws.handleStatic)
 	
 	log.Printf("[INFO] Web GUI started on http://0.0.0.0%s", ws.server.Addr)
@@ -222,33 +242,91 @@ func (ws *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 /*
-Handle dashboard
+Handle dashboard page
 */
 func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	ws.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		
-		data := ws.getDashboardData()
-		tmpl, err := template.New("dashboard").Parse(getDashboardHTML())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		
-		tmpl.Execute(w, data)
-	})(w, r)
+	// Check authentication first
+	sessionID, err := r.Cookie("session")
+	if err != nil || sessionID == nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	ws.sessionMutex.RLock()
+	sessionTime, exists := ws.sessions[sessionID.Value]
+	ws.sessionMutex.RUnlock()
+
+	if !exists || time.Since(sessionTime) > 24*time.Hour {
+		// Session expired or doesn't exist
+		ws.sessionMutex.Lock()
+		delete(ws.sessions, sessionID.Value)
+		ws.sessionMutex.Unlock()
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	// Update session timestamp
+	ws.sessionMutex.Lock()
+	ws.sessions[sessionID.Value] = time.Now()
+	ws.sessionMutex.Unlock()
+
+	// Set content type
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	
+	data := ws.getDashboardData()
+	
+	// Load main dashboard template
+	dashboardContent := getDashboardHTML()
+	
+	// Create template with functions
+	tmpl := template.New("dashboard").Funcs(getTemplateFunctions())
+	
+	// Parse main dashboard template
+	if _, err := tmpl.Parse(dashboardContent); err != nil {
+		log.Printf("[ERROR] Error parsing dashboard template: %v", err)
+		http.Error(w, "Error parsing dashboard template", http.StatusInternalServerError)
+		return
+	}
+	
+	if err := tmpl.Execute(w, data); err != nil {
+		log.Printf("[ERROR] Error executing template: %v", err)
+		http.Error(w, "Error executing template", http.StatusInternalServerError)
+		return
+	}
+}
+
+/*
+Check if user is authenticated (without redirect)
+*/
+func (ws *WebServer) isAuthenticated(r *http.Request) bool {
+	sessionID, err := r.Cookie("session")
+	if err != nil || sessionID == nil {
+		return false
+	}
+
+	ws.sessionMutex.RLock()
+	sessionTime, exists := ws.sessions[sessionID.Value]
+	ws.sessionMutex.RUnlock()
+
+	if !exists || time.Since(sessionTime) > 24*time.Hour {
+		return false
+	}
+
+	return true
 }
 
 /*
 Handle API stats endpoint
 */
 func (ws *WebServer) handleAPIStats(w http.ResponseWriter, r *http.Request) {
-	ws.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		
-		data := ws.getDashboardData()
-		json.NewEncoder(w).Encode(data)
-	})(w, r)
+	if !ws.isAuthenticated(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	data := ws.getDashboardData()
+	json.NewEncoder(w).Encode(data)
 }
 
 /*
@@ -343,21 +421,153 @@ func (ws *WebServer) handleAPIToggleLB(w http.ResponseWriter, r *http.Request) {
 }
 
 /*
+Handle API connections endpoint for real-time connection monitoring
+*/
+func (ws *WebServer) handleAPIConnections(w http.ResponseWriter, r *http.Request) {
+	ws.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		
+		if r.Method == "GET" {
+			// Get query parameters for filtering
+			sourceFilter := r.URL.Query().Get("source")
+			destFilter := r.URL.Query().Get("destination")
+			limitStr := r.URL.Query().Get("limit")
+			
+			limit := 100 // Default limit
+			if limitStr != "" {
+				if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+					limit = parsedLimit
+					if limit > 500 { // Maximum limit for performance
+						limit = 500
+					}
+				}
+			}
+			
+			connections := get_active_connections(sourceFilter, destFilter, limit)
+			
+			response := map[string]interface{}{
+				"active_connections": connections,
+				"total_count":       len(connections),
+				"limit":             limit,
+			}
+			
+			json.NewEncoder(w).Encode(response)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})(w, r)
+}
+
+/*
+Handle API traffic endpoint for real-time traffic statistics
+*/
+func (ws *WebServer) handleAPITraffic(w http.ResponseWriter, r *http.Request) {
+	ws.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		
+		if r.Method == "GET" {
+			uptime := time.Since(global_start_time)
+			
+			traffic := GlobalTrafficStats{
+				TotalBytesIn:         atomic.LoadInt64(&global_bytes_in),
+				TotalBytesOut:        atomic.LoadInt64(&global_bytes_out),
+				TotalDataTransferred: atomic.LoadInt64(&total_data_transferred),
+				ActiveConnections:    len(active_connections),
+				UptimeSeconds:        uptime.Seconds(),
+			}
+			
+			// Calculate rates
+			if uptime.Seconds() > 0 {
+				traffic.BytesPerSecond = int64(float64(traffic.TotalDataTransferred) / uptime.Seconds())
+			}
+			
+			json.NewEncoder(w).Encode(traffic)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})(w, r)
+}
+
+/*
+Handle API connection weight endpoint for individual connection weight management
+*/
+func (ws *WebServer) handleAPIConnectionWeight(w http.ResponseWriter, r *http.Request) {
+	ws.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		
+		if r.Method == "POST" {
+			var req struct {
+				SourceIP        string `json:"source_ip"`
+				LBAddress       string `json:"lb_address"`
+				ContentionRatio int    `json:"contention_ratio"`
+				Description     string `json:"description"`
+			}
+			
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			
+			success := add_source_ip_rule(req.LBAddress, req.SourceIP, req.ContentionRatio, req.Description)
+			response := map[string]interface{}{
+				"success": success,
+				"message": "Connection weight updated successfully",
+			}
+			
+			json.NewEncoder(w).Encode(response)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})(w, r)
+}
+
+/*
 Handle static files
 */
 func (ws *WebServer) handleStatic(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/static/")
+	relativePath := strings.TrimPrefix(r.URL.Path, "/static/")
 	
-	switch path {
-	case "style.css":
-		w.Header().Set("Content-Type", "text/css")
-		w.Write([]byte(getCSS()))
-	case "script.js":
-		w.Header().Set("Content-Type", "application/javascript")
-		w.Write([]byte(getJavaScript()))
-	default:
-		http.NotFound(w, r)
+	// Security check: prevent directory traversal
+	if strings.Contains(relativePath, "..") {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
 	}
+	
+	// Handle individual files
+	filePath := filepath.Join("web", "static", relativePath)
+	
+	// Set content type based on extension
+	ext := filepath.Ext(filePath)
+	switch ext {
+	case ".css":
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case ".js":
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	case ".html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	case ".png":
+		w.Header().Set("Content-Type", "image/png")
+	case ".jpg", ".jpeg":
+		w.Header().Set("Content-Type", "image/jpeg")
+	case ".gif":
+		w.Header().Set("Content-Type", "image/gif")
+	case ".svg":
+		w.Header().Set("Content-Type", "image/svg+xml")
+	default:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
+	
+	// Add cache headers for static files
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	
+	content := loadStaticFile(filePath)
+	if strings.HasPrefix(content, "/* Error loading") || strings.HasPrefix(content, "// Error loading") {
+		log.Printf("[WARN] Static file not found: %s", filePath)
+		http.NotFound(w, r)
+		return
+	}
+	
+	w.Write([]byte(content))
 }
 
 /*
@@ -430,12 +640,41 @@ func (ws *WebServer) getDashboardData() DashboardData {
 	}
 	
 	data.SystemInfo = SystemInfo{
-		Version:       "Enhanced v2.0",
-		Uptime:        time.Since(startTime).Round(time.Second).String(),
+		Version:       "Enhanced v3.0 Real-time",
+		Uptime:        time.Since(global_start_time).Round(time.Second).String(),
 		ConfigFile:    config_file,
 		ListenAddress: fmt.Sprintf(":%d", 8080), // This should be dynamic
 		TotalLBs:      len(lb_list),
-		StartTime:     startTime,
+		StartTime:     global_start_time,
+	}
+	
+	// Get real-time connection data
+	data.ActiveConnections = get_active_connections("", "", 50) // Limit to 50 for dashboard
+	
+	// Add connection history
+	connection_mutex.RLock()
+	if len(connection_history) > 20 {
+		data.ConnectionHistory = connection_history[len(connection_history)-20:] // Last 20 entries
+	} else {
+		data.ConnectionHistory = connection_history
+	}
+	connection_mutex.RUnlock()
+	
+	// Traffic statistics
+	uptime := time.Since(global_start_time)
+	data.TrafficStats = GlobalTrafficStats{
+		TotalBytesIn:         atomic.LoadInt64(&global_bytes_in),
+		TotalBytesOut:        atomic.LoadInt64(&global_bytes_out),
+		TotalDataTransferred: atomic.LoadInt64(&total_data_transferred),
+		ActiveConnections:    len(active_connections),
+		TotalConnections:     totalConnections,
+		UptimeSeconds:        uptime.Seconds(),
+	}
+	
+	// Calculate traffic rates
+	if uptime.Seconds() > 0 {
+		data.TrafficStats.BytesPerSecond = int64(float64(data.TrafficStats.TotalDataTransferred) / uptime.Seconds())
+		data.TrafficStats.ConnectionsPerMinute = int64(float64(totalConnections) / uptime.Minutes())
 	}
 	
 	return data
@@ -460,6 +699,63 @@ func (ws *WebServer) getLoadBalancersConfig() []map[string]interface{} {
 		}
 	}
 	return config
+}
+
+/*
+Template helper functions
+*/
+func getTemplateFunctions() template.FuncMap {
+	return template.FuncMap{
+		"add": func(a, b int) int {
+			return a + b
+		},
+		"percentage": func(part, total int) float64 {
+			if total == 0 {
+				return 0
+			}
+			return float64(part) / float64(total) * 100
+		},
+		"formatBytes": func(bytes int64) string {
+			if bytes == 0 {
+				return "0 B"
+			}
+			units := []string{"B", "KB", "MB", "GB", "TB"}
+			base := float64(1024)
+			
+			for i := len(units) - 1; i >= 0; i-- {
+				unit := float64(1)
+				for j := 0; j < i; j++ {
+					unit *= base
+				}
+				if float64(bytes) >= unit {
+					return fmt.Sprintf("%.1f %s", float64(bytes)/unit, units[i])
+				}
+			}
+			return fmt.Sprintf("%d B", bytes)
+		},
+		"duration": func(startTime time.Time) string {
+			duration := time.Since(startTime)
+			if duration < time.Minute {
+				return fmt.Sprintf("%ds", int(duration.Seconds()))
+			} else if duration < time.Hour {
+				return fmt.Sprintf("%dm %ds", int(duration.Minutes()), int(duration.Seconds())%60)
+			} else {
+				return fmt.Sprintf("%dh %dm", int(duration.Hours()), int(duration.Minutes())%60)
+			}
+		},
+		"len": func(slice interface{}) int {
+			switch s := slice.(type) {
+			case []active_connection:
+				return len(s)
+			case []SourceIPInfo:
+				return len(s)
+			case map[string]source_ip_rule:
+				return len(s)
+			default:
+				return 0
+			}
+		},
+	}
 }
 
 /*
