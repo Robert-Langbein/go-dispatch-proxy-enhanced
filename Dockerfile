@@ -3,7 +3,7 @@
     WORKDIR /src
     RUN apk add --no-cache git
     # schlanker Shallow-Clone
-    RUN git clone --depth 1 https://github.com/extremecoders-re/go-dispatch-proxy.git .
+    RUN git clone --depth 1 https://github.com/Robert-Langbein/go-dispatch-proxy-enhanced.git .
     RUN go build -o /go-dispatch-proxy .
     
     # ---- Runtime-Stage --------------------------------------------------------
