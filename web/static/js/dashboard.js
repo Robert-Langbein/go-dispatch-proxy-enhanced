@@ -13,8 +13,8 @@ let chartData = {
         {
             label: 'Download Speed',
             data: [],
-            borderColor: 'rgb(0, 184, 169)',
-            backgroundColor: 'rgba(0, 184, 169, 0.1)',
+            borderColor: '#006fff',
+            backgroundColor: 'rgba(0, 111, 255, 0.1)',
             tension: 0.4,
             fill: true,
             pointRadius: 0,
@@ -24,8 +24,8 @@ let chartData = {
         {
             label: 'Upload Speed',
             data: [],
-            borderColor: 'rgb(220, 38, 38)',
-            backgroundColor: 'rgba(220, 38, 38, 0.1)',
+            borderColor: '#00b8a9',
+            backgroundColor: 'rgba(0, 184, 169, 0.1)',
             tension: 0.4,
             fill: true,
             pointRadius: 0,
@@ -190,22 +190,15 @@ function updateTrafficData() {
     fetch('/api/traffic')
         .then(response => response.json())
         .then(data => {
-            // Update traffic statistics
-            const bytesPerSecondEl = document.getElementById('bytesPerSecond');
+            // Update traffic statistics (but NOT the separate speed displays)
             const totalDataTransferredEl = document.getElementById('totalDataTransferred');
             const activeConnectionsEl = document.getElementById('activeConnections');
-            const connectionsPerMinuteEl = document.getElementById('connectionsPerMinute');
+            const connectionsPerSecondEl = document.getElementById('connectionsPerSecond');
             
-            if (bytesPerSecondEl) {
-                const bytesRate = formatBytes(data.bytes_per_second) + '/s';
-                const bitsRate = formatBits(data.bytes_per_second * 8) + 'bit/s';
-                bytesPerSecondEl.innerHTML = bytesRate + '<br><small class="speed-bits">' + bitsRate + '</small>';
-            }
-            
-            // Note: Separate upload/download speeds are now updated in updateTrafficChart()
+            // Note: Combined, upload, and download speeds are updated in updateSeparateSpeedDisplays()
             if (totalDataTransferredEl) totalDataTransferredEl.textContent = formatBytes(data.total_data_transferred);
             if (activeConnectionsEl) activeConnectionsEl.textContent = data.active_connections;
-            if (connectionsPerMinuteEl) connectionsPerMinuteEl.textContent = data.connections_per_minute;
+            if (connectionsPerSecondEl) connectionsPerSecondEl.textContent = data.connections_per_second;
             
             // Update traffic bars
             updateTrafficBars();
@@ -287,16 +280,18 @@ function initializeTheme() {
     const savedTheme = localStorage.getItem('theme') || 'light';
     document.documentElement.setAttribute('data-theme', savedTheme);
     
-    // Update toggle button
+    // Update toggle button if it exists
     const themeIcon = document.querySelector('.theme-icon');
     const themeText = document.querySelector('.theme-text');
     
-    if (savedTheme === 'dark') {
-        themeIcon.className = 'fas fa-sun theme-icon';
-        themeText.textContent = 'Light';
-    } else {
-        themeIcon.className = 'fas fa-moon theme-icon';
-        themeText.textContent = 'Dark';
+    if (themeIcon && themeText) {
+        if (savedTheme === 'dark') {
+            themeIcon.className = 'fas fa-sun theme-icon';
+            themeText.textContent = 'Light';
+        } else {
+            themeIcon.className = 'fas fa-moon theme-icon';
+            themeText.textContent = 'Dark';
+        }
     }
 }
 
@@ -453,6 +448,116 @@ async function removeSourceIPRule(lbAddress, sourceIP) {
     setTimeout(() => showSourceIPManagement(sourceIP), 500);
 }
 
+// Add missing functions for template compatibility
+async function addSourceIPRule() {
+    const form = document.getElementById('addRuleForm');
+    const formData = new FormData(form);
+    
+    const data = {
+        lb_address: formData.get('lb_address'),
+        source_ip: formData.get('source_ip'),
+        contention_ratio: parseInt(formData.get('contention_ratio')),
+        description: formData.get('description')
+    };
+    
+    try {
+        const response = await fetch('/api/rules', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            closeModal('addRuleModal');
+            refreshDashboard();
+        } else {
+            alert('Failed to add rule');
+        }
+    } catch (error) {
+        console.error('Error adding rule:', error);
+        alert('Error adding rule: ' + error.message);
+    }
+}
+
+async function setWeight() {
+    const form = document.getElementById('weightForm');
+    const formData = new FormData(form);
+    
+    const data = {
+        source_ip: formData.get('source_ip'),
+        lb_address: formData.get('lb_address'),
+        contention_ratio: parseInt(formData.get('contention_ratio')),
+        description: formData.get('description')
+    };
+    
+    try {
+        const response = await fetch('/api/connection/weight', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            closeModal('weightModal');
+            refreshDashboard();
+        } else {
+            alert('Failed to set weight');
+        }
+    } catch (error) {
+        console.error('Error setting weight:', error);
+        alert('Error setting weight: ' + error.message);
+    }
+}
+
+function showRulesModal(lbAddress) {
+    // Find the load balancer data
+    fetch('/api/stats')
+        .then(response => response.json())
+        .then(data => {
+            const lb = data.load_balancers.find(l => l.address === lbAddress);
+            if (!lb) {
+                alert('Load balancer not found');
+                return;
+            }
+            
+            let content = '<h4>Source IP Rules for LB: ' + lbAddress + '</h4>';
+            
+            if (lb.source_ip_rules && Object.keys(lb.source_ip_rules).length > 0) {
+                content += '<table class="data-table">';
+                content += '<thead><tr><th>Source IP</th><th>Ratio</th><th>Description</th><th>Actions</th></tr></thead>';
+                content += '<tbody>';
+                
+                Object.entries(lb.source_ip_rules).forEach(([sourceIP, rule]) => {
+                    content += '<tr>';
+                    content += '<td>' + sourceIP + '</td>';
+                    content += '<td>' + rule.contention_ratio + '</td>';
+                    content += '<td>' + (rule.description || 'No description') + '</td>';
+                    content += '<td>';
+                    content += '<button class="btn btn-sm btn-danger" onclick="removeRule(\'' + lbAddress + '\', \'' + sourceIP + '\')">Remove</button>';
+                    content += '</td>';
+                    content += '</tr>';
+                });
+                
+                content += '</tbody></table>';
+            } else {
+                content += '<p>No custom rules defined for this load balancer.</p>';
+            }
+            
+            document.getElementById('rulesContent').innerHTML = content;
+            showModal('viewRulesModal');
+        })
+        .catch(error => {
+            console.error('Error loading rules:', error);
+            alert('Error loading rules: ' + error.message);
+        });
+}
+
 // Form Submissions
 // Initialize Traffic Chart
 function initializeTrafficChart() {
@@ -474,6 +579,7 @@ function initializeTrafficChart() {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                resizeDelay: 0,
                 animation: {
                     duration: 0 // Disable animations for real-time updates
                 },
@@ -481,7 +587,7 @@ function initializeTrafficChart() {
                     title: {
                         display: true,
                         text: 'Real-time Upload/Download Speeds',
-                        color: '#f8fafc',
+                        color: '#212327',
                         font: {
                             size: 16
                         }
@@ -489,7 +595,7 @@ function initializeTrafficChart() {
                     legend: {
                         position: 'top',
                         labels: {
-                            color: '#f8fafc',
+                            color: '#212327',
                             usePointStyle: true,
                             padding: 20
                         }
@@ -502,13 +608,13 @@ function initializeTrafficChart() {
                         title: {
                             display: true,
                             text: 'Time (seconds ago)',
-                            color: '#94a3b8'
+                            color: '#50565e'
                         },
                         grid: {
-                            color: 'rgba(255, 255, 255, 0.1)'
+                            color: 'rgba(80, 86, 94, 0.2)'
                         },
                         ticks: {
-                            color: '#94a3b8',
+                            color: '#50565e',
                             stepSize: 10,
                             callback: function(value) {
                                 const seconds = Math.floor((60 - value) / 2); // Convert index to seconds ago
@@ -521,13 +627,13 @@ function initializeTrafficChart() {
                         title: {
                             display: true,
                             text: 'Speed (MB/s)',
-                            color: '#94a3b8'
+                            color: '#50565e'
                         },
                         grid: {
-                            color: 'rgba(255, 255, 255, 0.1)'
+                            color: 'rgba(80, 86, 94, 0.2)'
                         },
                         ticks: {
-                            color: '#94a3b8',
+                            color: '#50565e',
                             callback: function(value) {
                                 if (value === 0) return '0';
                                 if (value < 1) return (value * 1000).toFixed(0) + ' KB/s';
@@ -575,21 +681,48 @@ function updateTrafficChart() {
         });
 }
 
-// Update separate speed displays
+// Update separate speed displays with stacked format
 function updateSeparateSpeedDisplays(data) {
-    const bytesInPerSecondEl = document.getElementById('bytesInPerSecond');
-    const bytesOutPerSecondEl = document.getElementById('bytesOutPerSecond');
+    // Update upload speed with stacked display
+    const uploadSpeedEl = document.getElementById('uploadSpeed');
+    const uploadSpeedBitsEl = document.getElementById('uploadSpeedBits');
     
-    if (bytesInPerSecondEl && data.bytes_in_per_second !== undefined) {
-        const bytesInRate = formatBytes(data.bytes_in_per_second) + '/s';
-        const bitsInRate = formatBits(data.bytes_in_per_second * 8) + 'bit/s';
-        bytesInPerSecondEl.innerHTML = bytesInRate + '<small class="speed-bits">' + bitsInRate + '</small>';
+    if (uploadSpeedEl && data.bytes_out_per_second !== undefined) {
+        const bytesOutRate = formatBytes(data.bytes_out_per_second) + '/s';
+        uploadSpeedEl.textContent = bytesOutRate;
     }
     
-    if (bytesOutPerSecondEl && data.bytes_out_per_second !== undefined) {
-        const bytesOutRate = formatBytes(data.bytes_out_per_second) + '/s';
+    if (uploadSpeedBitsEl && data.bytes_out_per_second !== undefined) {
         const bitsOutRate = formatBits(data.bytes_out_per_second * 8) + 'bit/s';
-        bytesOutPerSecondEl.innerHTML = bytesOutRate + '<small class="speed-bits">' + bitsOutRate + '</small>';
+        uploadSpeedBitsEl.textContent = bitsOutRate;
+    }
+    
+    // Update download speed with stacked display
+    const downloadSpeedEl = document.getElementById('downloadSpeed');
+    const downloadSpeedBitsEl = document.getElementById('downloadSpeedBits');
+    
+    if (downloadSpeedEl && data.bytes_in_per_second !== undefined) {
+        const bytesInRate = formatBytes(data.bytes_in_per_second) + '/s';
+        downloadSpeedEl.textContent = bytesInRate;
+    }
+    
+    if (downloadSpeedBitsEl && data.bytes_in_per_second !== undefined) {
+        const bitsInRate = formatBits(data.bytes_in_per_second * 8) + 'bit/s';
+        downloadSpeedBitsEl.textContent = bitsInRate;
+    }
+    
+    // Update combined speed with stacked display
+    const bytesPerSecondEl = document.getElementById('bytesPerSecond');
+    const combinedSpeedBitsEl = document.querySelector('#bytesPerSecond').parentElement.querySelector('.speed-bits');
+    
+    if (bytesPerSecondEl && data.bytes_per_second !== undefined) {
+        const combinedRate = formatBytes(data.bytes_per_second) + '/s';
+        bytesPerSecondEl.textContent = combinedRate;
+    }
+    
+    if (combinedSpeedBitsEl && data.bytes_per_second !== undefined) {
+        const combinedBitsRate = formatBits(data.bytes_per_second * 8) + 'bit/s';
+        combinedSpeedBitsEl.textContent = combinedBitsRate;
     }
 }
 

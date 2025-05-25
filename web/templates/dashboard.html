@@ -10,87 +10,175 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.js"></script>
 </head>
 <body>
-    <!-- Top Navigation -->
-    <nav class="navbar">
-        <div class="nav-brand">
-            <i class="fas fa-network-wired nav-icon"></i>
-            <h1>Go Dispatch Proxy Enhanced</h1>
-        </div>
-        <div class="nav-controls">
-            <div class="status-indicator {{if gt .SystemInfo.TotalLBs 0}}online{{else}}offline{{end}}">
-                <i class="fas fa-circle status-dot"></i>
-                <span>{{if gt .SystemInfo.TotalLBs 0}}Online{{else}}Offline{{end}}</span>
+    <div class="dashboard-container">
+        <!-- UniFi Style Header -->
+        <header class="header">
+            <div class="header-left">
+                <a href="#" class="header-logo">
+                    <i class="fas fa-network-wired"></i>
+                    UniFi
+                </a>
+                <h1 class="header-title">Go Dispatch Proxy Enhanced</h1>
             </div>
-            <button class="btn btn-outline" onclick="refreshDashboard()">
-                <i class="fas fa-sync-alt"></i>
-                Refresh
-            </button>
-            <button class="btn btn-outline theme-toggle" onclick="toggleTheme()">
-                <i class="fas fa-moon theme-icon"></i>
-                <span class="theme-text">Dark</span>
-            </button>
-            <a href="/logout" class="btn btn-danger">
-                <i class="fas fa-sign-out-alt"></i>
-                Logout
-            </a>
-        </div>
-    </nav>
-
-    <div class="container">
-        <!-- System Overview Cards -->
-        <div class="section">
-            <h2><i class="fas fa-chart-line"></i> System Overview</h2>
-            <div class="stats-grid">
-                <div class="stat-card primary">
-                    <div class="stat-icon">
-                        <i class="fas fa-balance-scale"></i>
-                    </div>
-                    <div class="stat-content">
-                        <div class="stat-value">{{.SystemInfo.TotalLBs}}</div>
-                        <div class="stat-label">Load Balancers</div>
-                    </div>
+            <div class="header-right">
+                <div class="header-user">
+                    <i class="fas fa-user-circle"></i>
+                    <span>admin</span>
                 </div>
+                <div class="status-indicator {{if gt .SystemInfo.TotalLBs 0}}success{{else}}neutral{{end}}">
+                    <div class="status-ball {{if gt .SystemInfo.TotalLBs 0}}success{{else}}neutral{{end}}"></div>
+                    <span>{{if gt .SystemInfo.TotalLBs 0}}Online{{else}}Offline{{end}}</span>
+                </div>
+                <button class="btn btn-secondary" onclick="refreshDashboard()">
+                    <i class="fas fa-sync-alt"></i>
+                    Refresh
+                </button>
+                <a href="/logout" class="btn btn-danger">
+                    <i class="fas fa-sign-out-alt"></i>
+                    Logout
+                </a>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- System Overview Stats -->
+            <section class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <h3 class="stat-card-title">Load Balancers</h3>
+                        <i class="fas fa-balance-scale stat-card-icon"></i>
+                    </div>
+                    <div class="stat-card-value">{{.SystemInfo.TotalLBs}}</div>
+                    <p class="stat-card-subtitle">Active interfaces</p>
+                </div>
+                
                 <div class="stat-card success">
-                    <div class="stat-icon">
-                        <i class="fas fa-link"></i>
+                    <div class="stat-card-header">
+                        <h3 class="stat-card-title">Connections</h3>
+                        <i class="fas fa-link stat-card-icon"></i>
                     </div>
-                    <div class="stat-content">
-                        <div class="stat-value">{{.TotalConnections}}</div>
-                        <div class="stat-label">Total Connections</div>
-                    </div>
+                    <div class="stat-card-value">{{.TotalConnections}}</div>
+                    <p class="stat-card-subtitle">Total established</p>
                 </div>
-                <div class="stat-card info">
-                    <div class="stat-icon">
-                        <i class="fas fa-chart-pie"></i>
+                
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <h3 class="stat-card-title">Success Rate</h3>
+                        <i class="fas fa-chart-pie stat-card-icon"></i>
                     </div>
-                    <div class="stat-content">
-                        <div class="stat-value">{{printf "%.1f%%" .OverallSuccessRate}}</div>
-                        <div class="stat-label">Success Rate</div>
-                    </div>
+                    <div class="stat-card-value">{{printf "%.1f%%" .OverallSuccessRate}}</div>
+                    <p class="stat-card-subtitle">Overall performance</p>
                 </div>
+                
                 <div class="stat-card warning">
-                    <div class="stat-icon">
-                        <i class="fas fa-clock"></i>
+                    <div class="stat-card-header">
+                        <h3 class="stat-card-title">Uptime</h3>
+                        <i class="fas fa-clock stat-card-icon"></i>
                     </div>
-                    <div class="stat-content">
-                        <div class="stat-value">{{.SystemInfo.Uptime}}</div>
-                        <div class="stat-label">Uptime</div>
+                    <div class="stat-card-value">{{.SystemInfo.Uptime}}</div>
+                    <p class="stat-card-subtitle">System running</p>
+                </div>
+            </section>
+
+            <!-- Real-time Traffic Grid -->
+            <section class="traffic-grid">
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Combined Speed</h4>
+                    <div class="traffic-card-value" id="bytesPerSecond">
+                        {{formatBytes .TrafficStats.BytesPerSecond}}/s
+                    </div>
+                    <p class="traffic-card-unit speed-bits">0 bit/s</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Upload Speed</h4>
+                    <div class="traffic-card-value" id="uploadSpeed">
+                        {{formatBytes .TrafficStats.BytesOutPerSecond}}/s
+                    </div>
+                    <p class="traffic-card-unit speed-bits" id="uploadSpeedBits">0 bit/s</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Download Speed</h4>
+                    <div class="traffic-card-value" id="downloadSpeed">
+                        {{formatBytes .TrafficStats.BytesInPerSecond}}/s
+                    </div>
+                    <p class="traffic-card-unit speed-bits" id="downloadSpeedBits">0 bit/s</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Total Data</h4>
+                    <div class="traffic-card-value" id="totalDataTransferred">{{formatBytes .TrafficStats.TotalDataTransferred}}</div>
+                    <p class="traffic-card-unit">Lifetime transfer</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Active Connections</h4>
+                    <div class="traffic-card-value" id="activeConnections">{{.TrafficStats.ActiveConnections}}</div>
+                    <p class="traffic-card-unit">Current sessions</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Connection Rate</h4>
+                    <div class="traffic-card-value" id="connectionsPerSecond">{{.TrafficStats.ConnectionsPerSecond}}</div>
+                    <p class="traffic-card-unit">Per second</p>
+                </div>
+            </section>
+
+            <!-- Real-time Traffic Chart -->
+            <section class="chart-container">
+                <div class="chart-header">
+                    <h2 class="chart-title">
+                        <i class="fas fa-chart-line"></i>
+                        Real-time Traffic Monitor
+                    </h2>
+                </div>
+                <canvas id="trafficChart" class="chart-canvas"></canvas>
+            </section>
+
+            <!-- Traffic Distribution -->
+            <section class="table-container">
+                <div class="table-header">
+                    <h2 class="table-title">
+                        <i class="fas fa-chart-bar"></i>
+                        Load Balancer Traffic Distribution
+                    </h2>
+                </div>
+                <div class="table-wrapper">
+                    <div class="distribution-bars">
+                        {{range $index, $lb := .LoadBalancers}}
+                        <div class="interface-item">
+                            <div class="interface-info">
+                                <div class="status-ball {{if $lb.Enabled}}success{{else}}neutral{{end}}"></div>
+                                <div>
+                                    <div class="interface-name">
+                                        <i class="fas fa-server"></i>
+                                        LB{{add $index 1}}: {{$lb.Address}}
+                                    </div>
+                                    <div class="interface-ip">{{$lb.TotalConnections}} connections ({{printf "%.1f%%" (percentage $lb.TotalConnections $.TotalConnections)}})</div>
+                                </div>
+                            </div>
+                            <div class="interface-status">
+                                <div class="traffic-bar-container">
+                                    <div class="traffic-bar" style="width: {{percentage $lb.TotalConnections $.TotalConnections}}%;"></div>
+                                </div>
+                            </div>
+                        </div>
+                        {{end}}
                     </div>
                 </div>
-            </div>
-        </div>
+            </section>
 
-        <!-- Load Balancers Section -->
-        <div class="section">
-            <h2><i class="fas fa-balance-scale-right"></i> Load Balancers</h2>
-            <div class="lb-grid">
+            <!-- Load Balancers Section -->
+            <section class="load-balancer-grid">
                 {{range .LoadBalancers}}
-                <div class="lb-card {{if .Enabled}}enabled{{else}}disabled{{end}}">
-                    <div class="lb-header">
-                        <div class="lb-title">
+                <div class="load-balancer-card">
+                    <div class="load-balancer-header">
+                        <h3 class="load-balancer-title">
                             <i class="fas fa-server"></i>
-                            <h3>LB {{.ID}}: {{.Address}}</h3>
-                        </div>
+                            LB {{.ID}}: {{.Address}}
+                        </h3>
                         <label class="toggle-switch">
                             <input type="checkbox" {{if .Enabled}}checked{{end}} 
                                    onchange="toggleLoadBalancer('{{.Address}}', this.checked)">
@@ -98,525 +186,515 @@
                         </label>
                     </div>
                     
-                    <div class="lb-info">
-                        <div class="info-row">
-                            <i class="fas fa-ethernet"></i>
-                            <span><strong>Interface:</strong> {{.Interface}}</span>
-                        </div>
-                        <div class="info-row">
-                            <i class="fas fa-weight-hanging"></i>
-                            <span><strong>Default Ratio:</strong> {{.DefaultRatio}}</span>
-                        </div>
-                        <div class="info-row">
-                            <i class="fas fa-percentage"></i>
-                            <span><strong>Success Rate:</strong> {{printf "%.1f%%" .SuccessRate}}</span>
-                        </div>
-                    </div>
-                    
-                    <div class="lb-stats">
-                        <div class="stat-group">
-                            <div class="stat-item total">
-                                <i class="fas fa-list-ol"></i>
-                                <span>{{.TotalConnections}}</span>
-                                <small>Total</small>
-                            </div>
-                            <div class="stat-item success">
-                                <i class="fas fa-check-circle"></i>
-                                <span>{{.SuccessCount}}</span>
-                                <small>Success</small>
-                            </div>
-                            <div class="stat-item error">
-                                <i class="fas fa-times-circle"></i>
-                                <span>{{.FailureCount}}</span>
-                                <small>Failures</small>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    {{if .SourceIPRules}}
-                    <div class="source-rules">
-                        <h4><i class="fas fa-filter"></i> Source IP Rules ({{len .SourceIPRules}})</h4>
-                        <div class="rules-list">
-                            {{range $ip, $rule := .SourceIPRules}}
-                            <div class="rule-item">
-                                <div class="rule-info">
-                                    <i class="fas fa-map-marker-alt"></i>
-                                    <span class="source-ip">{{$ip}}</span>
-                                    <span class="ratio">Ratio: {{$rule.ContentionRatio}}</span>
+                    <div class="load-balancer-body">
+                        <div class="interface-item">
+                            <div class="interface-info">
+                                <div class="status-ball {{if .Enabled}}success{{else}}neutral{{end}}"></div>
+                                <div>
+                                    <div class="interface-name">{{.Interface}}</div>
+                                    <div class="interface-ip">{{.Address}}</div>
                                 </div>
-                                <button class="btn btn-small btn-danger" 
-                                        onclick="removeRule('{{$.Address}}', '{{$ip}}')">
-                                    <i class="fas fa-trash"></i>
+                            </div>
+                            <div class="interface-status">
+                                <span class="text-secondary">Ratio: {{.DefaultRatio}}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="interface-item">
+                            <div class="interface-info">
+                                <i class="fas fa-chart-pie text-tertiary"></i>
+                                <div>
+                                    <div class="interface-name">Success Rate</div>
+                                    <div class="interface-ip">{{printf "%.1f%%" .SuccessRate}}</div>
+                                </div>
+                            </div>
+                            <div class="interface-status">
+                                <span class="text-success">{{.SuccessCount}}/{{.TotalConnections}}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="interface-item">
+                            <div class="interface-info">
+                                <i class="fas fa-times-circle text-tertiary"></i>
+                                <div>
+                                    <div class="interface-name">Failures</div>
+                                    <div class="interface-ip">{{.FailureCount}} failed connections</div>
+                                </div>
+                            </div>
+                            <div class="interface-status">
+                                <span class="text-{{if eq .FailureCount 0}}success{{else}}danger{{end}}">{{.FailureCount}}</span>
+                            </div>
+                        </div>
+                        
+                        {{if .SourceIPRules}}
+                        <div class="interface-item">
+                            <div class="interface-info">
+                                <i class="fas fa-filter text-tertiary"></i>
+                                <div>
+                                    <div class="interface-name">Source IP Rules</div>
+                                    <div class="interface-ip">{{len .SourceIPRules}} custom rules</div>
+                                </div>
+                            </div>
+                            <div class="interface-status">
+                                <button class="btn btn-sm btn-secondary" onclick="showRulesModal('{{.Address}}')">
+                                    <i class="fas fa-eye"></i>
+                                    View
                                 </button>
                             </div>
-                            {{end}}
                         </div>
+                        {{end}}
+                        
+                        <div class="interface-item">
+                            <button class="btn btn-primary w-100" onclick="showAddRuleModal('{{.Address}}')">
+                                <i class="fas fa-plus"></i>
+                                Add Source IP Rule
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+            </section>
+
+            <!-- Active Connections -->
+            <section class="table-container">
+                <div class="table-header">
+                    <h2 class="table-title">
+                        <i class="fas fa-network-wired"></i>
+                        Active Connections
+                    </h2>
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="form-group mb-0">
+                            <input type="text" id="sourceFilter" class="form-control" 
+                                   placeholder="Filter by source IP..." onkeyup="filterConnections()" style="width: 200px;">
+                        </div>
+                        <div class="form-group mb-0">
+                            <input type="text" id="destFilter" class="form-control" 
+                                   placeholder="Filter by destination..." onkeyup="filterConnections()" style="width: 200px;">
+                        </div>
+                        <button class="btn btn-primary" onclick="refreshConnections()">
+                            <i class="fas fa-sync-alt"></i>
+                            Refresh
+                        </button>
+                        <div class="text-secondary">
+                            <i class="fas fa-list"></i>
+                            Showing: <span id="connectionCount">{{len .ActiveConnections}}</span> connections
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    {{if .ActiveConnections}}
+                    <table class="data-table" id="connectionsTable">
+                        <thead>
+                            <tr>
+                                <th><i class="fas fa-map-marker-alt"></i> Source IP</th>
+                                <th><i class="fas fa-bullseye"></i> Destination</th>
+                                <th><i class="fas fa-server"></i> Load Balancer</th>
+                                <th><i class="fas fa-clock"></i> Duration</th>
+                                <th><i class="fas fa-exchange-alt"></i> Traffic</th>
+                                <th><i class="fas fa-info-circle"></i> Status</th>
+                                <th><i class="fas fa-cogs"></i> Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="connectionsBody">
+                            {{range .ActiveConnections}}
+                            <tr class="connection-row" data-source="{{.SourceIP}}" data-dest="{{.DestinationIP}}">
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <span class="font-weight-bold text-primary" onclick="showSourceIPManagement('{{.SourceIP}}')" style="cursor: pointer;">
+                                            {{.SourceIP}}
+                                        </span>
+                                        <span class="text-tertiary">:{{.SourcePort}}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <span class="font-weight-bold">{{.DestinationIP}}</span>
+                                        <span class="text-tertiary">:{{.DestinationPort}}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-server text-tertiary"></i>
+                                        <span class="ml-2">LB{{add .LBIndex 1}}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-stopwatch text-tertiary"></i>
+                                        <span class="ml-2">{{duration .StartTime}}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex flex-column">
+                                        <span class="text-success">
+                                            <i class="fas fa-arrow-down"></i>
+                                            {{formatBytes .BytesIn}}
+                                        </span>
+                                        <span class="text-info">
+                                            <i class="fas fa-arrow-up"></i>
+                                            {{formatBytes .BytesOut}}
+                                        </span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="status-ball {{.Status}}"></div>
+                                        <span class="text-{{.Status}}">{{.Status}}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary" onclick="showWeightModal('{{.SourceIP}}')">
+                                        <i class="fas fa-weight-hanging"></i>
+                                        Set Weight
+                                    </button>
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <div class="empty-state">
+                        <i class="fas fa-info-circle empty-state-icon"></i>
+                        <h3 class="empty-state-title">No active connections</h3>
+                        <p class="empty-state-description">Start using the SOCKS proxy to see real-time connections here</p>
                     </div>
                     {{end}}
-                    
-                    <div class="lb-actions">
-                        <button class="btn btn-primary" 
-                                onclick="showAddRuleModal('{{.Address}}')">
-                            <i class="fas fa-plus"></i>
-                            Add Source IP Rule
-                        </button>
-                    </div>
                 </div>
-                {{end}}
-            </div>
-        </div>
+            </section>
 
-        <!-- Real-time Traffic Statistics -->
-        <div class="section">
-            <h2><i class="fas fa-tachometer-alt"></i> Real-time Traffic</h2>
-            <div class="traffic-stats">
-                <div class="traffic-grid">
-                    <div class="traffic-card transfer">
-                        <div class="traffic-icon">
-                            <i class="fas fa-download"></i>
-                        </div>
-                        <div class="traffic-content">
-                            <div class="traffic-value" id="bytesPerSecond">
-                                {{formatBytes .TrafficStats.BytesPerSecond}}/s
-                                <small class="speed-bits">0 bit/s</small>
-                            </div>
-                            <div class="traffic-label">Combined Rate</div>
-                        </div>
-                    </div>
-                    <div class="traffic-card data">
-                        <div class="traffic-icon">
-                            <i class="fas fa-database"></i>
-                        </div>
-                        <div class="traffic-content">
-                            <div class="traffic-value" id="totalDataTransferred">{{formatBytes .TrafficStats.TotalDataTransferred}}</div>
-                            <div class="traffic-label">Total Data</div>
-                        </div>
-                    </div>
-                    <div class="traffic-card connections">
-                        <div class="traffic-icon">
-                            <i class="fas fa-plug"></i>
-                        </div>
-                        <div class="traffic-content">
-                            <div class="traffic-value" id="activeConnections">{{.TrafficStats.ActiveConnections}}</div>
-                            <div class="traffic-label">Active Connections</div>
-                        </div>
-                    </div>
-                    <div class="traffic-card rate">
-                        <div class="traffic-icon">
-                            <i class="fas fa-stopwatch"></i>
-                        </div>
-                        <div class="traffic-content">
-                            <div class="traffic-value" id="connectionsPerMinute">{{.TrafficStats.ConnectionsPerMinute}}</div>
-                            <div class="traffic-label">Connections/min</div>
-                        </div>
-                    </div>
-                    <div class="traffic-card download">
-                        <div class="traffic-icon">
-                            <i class="fas fa-download"></i>
-                        </div>
-                        <div class="traffic-content">
-                            <div class="traffic-value" id="bytesInPerSecond">
-                                {{formatBytes .TrafficStats.BytesInPerSecond}}/s
-                                <small class="speed-bits">0 bit/s</small>
-                            </div>
-                            <div class="traffic-label">Download Speed</div>
-                        </div>
-                    </div>
-                    <div class="traffic-card upload">
-                        <div class="traffic-icon">
-                            <i class="fas fa-upload"></i>
-                        </div>
-                        <div class="traffic-content">
-                            <div class="traffic-value" id="bytesOutPerSecond">
-                                {{formatBytes .TrafficStats.BytesOutPerSecond}}/s
-                                <small class="speed-bits">0 bit/s</small>
-                            </div>
-                            <div class="traffic-label">Upload Speed</div>
-                        </div>
-                    </div>
+            <!-- Active Source IPs -->
+            {{if .ActiveSources}}
+            <section class="table-container">
+                <div class="table-header">
+                    <h2 class="table-title">
+                        <i class="fas fa-globe"></i>
+                        Active Source IPs
+                    </h2>
                 </div>
-                
-                <!-- Real-time Traffic Chart -->
-                <div class="traffic-chart-section">
-                    <h3><i class="fas fa-chart-line"></i> Real-time Traffic Chart (Last 30 seconds)</h3>
-                    <div class="chart-container">
-                        <canvas id="trafficChart" width="800" height="300"></canvas>
-                    </div>
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th><i class="fas fa-map-marker-alt"></i> Source IP</th>
+                                <th><i class="fas fa-link"></i> Active Connections</th>
+                                <th><i class="fas fa-server"></i> Assigned LB</th>
+                                <th><i class="fas fa-weight-hanging"></i> Effective Ratio</th>
+                                <th><i class="fas fa-cogs"></i> Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .ActiveSources}}
+                            <tr>
+                                <td>
+                                    <span class="font-weight-bold text-primary" onclick="showSourceIPManagement('{{.SourceIP}}')" style="cursor: pointer;">
+                                        {{.SourceIP}}
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-list-ol text-tertiary"></i>
+                                        <span class="ml-2">{{.ActiveConnections}}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-server text-tertiary"></i>
+                                        <span class="ml-2">{{.AssignedLB}}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-percentage text-tertiary"></i>
+                                        <span class="ml-2">{{.EffectiveRatio}}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <button class="btn btn-primary" onclick="showSourceIPManagement('{{.SourceIP}}')">
+                                        <i class="fas fa-cogs"></i>
+                                        Manage Rules
+                                    </button>
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
                 </div>
-                
-                <!-- Traffic Distribution -->
-                <div class="traffic-distribution">
-                    <h3><i class="fas fa-chart-bar"></i> Load Balancer Traffic Distribution</h3>
-                    <div class="distribution-bars">
-                        {{range $index, $lb := .LoadBalancers}}
-                        <div class="lb-traffic-bar">
-                            <div class="lb-traffic-info">
-                                <div class="lb-traffic-label">
-                                    <i class="fas fa-server"></i>
-                                    LB{{add $index 1}}: {{$lb.Address}}
-                                </div>
-                                <div class="lb-traffic-stats">
-                                    {{$lb.TotalConnections}} connections ({{printf "%.1f%%" (percentage $lb.TotalConnections $.TotalConnections)}})
-                                </div>
-                            </div>
-                            <div class="traffic-bar-container">
-                                <div class="traffic-bar" data-lb="{{$index}}" style="width: {{percentage $lb.TotalConnections $.TotalConnections}}%">
-                                    <div class="traffic-bar-fill"></div>
-                                </div>
-                            </div>
-                        </div>
-                        {{end}}
-                    </div>
-                </div>
-            </div>
-        </div>
+            </section>
+            {{end}}
 
-        <!-- Active Connections -->
-        <div class="section">
-            <h2><i class="fas fa-network-wired"></i> Active Connections</h2>
-            
-            <div class="connections-controls">
-                <div class="filter-group">
-                    <div class="filter-item">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="sourceFilter" placeholder="Filter by source IP..." onkeyup="filterConnections()">
-                    </div>
-                    <div class="filter-item">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="destFilter" placeholder="Filter by destination..." onkeyup="filterConnections()">
-                    </div>
-                </div>
-                <div class="control-group">
-                    <button class="btn btn-primary" onclick="refreshConnections()">
-                        <i class="fas fa-sync-alt"></i>
-                        Refresh
-                    </button>
-                    <div class="connection-count">
+            <!-- Connection Statistics Table -->
+            <section class="table-container">
+                <div class="table-header">
+                    <h2 class="table-title">
                         <i class="fas fa-list"></i>
-                        Showing: <span id="connectionCount">{{len .ActiveConnections}}</span> connections
-                    </div>
+                        Connection Statistics
+                    </h2>
                 </div>
-            </div>
-            
-            <div class="connections-table" id="connectionsTable">
-                {{if .ActiveConnections}}
-                <table class="unifi-table">
-                    <thead>
-                        <tr>
-                            <th><i class="fas fa-map-marker-alt"></i> Source IP</th>
-                            <th><i class="fas fa-bullseye"></i> Destination</th>
-                            <th><i class="fas fa-server"></i> Load Balancer</th>
-                            <th><i class="fas fa-clock"></i> Duration</th>
-                            <th><i class="fas fa-exchange-alt"></i> Traffic</th>
-                            <th><i class="fas fa-info-circle"></i> Status</th>
-                            <th><i class="fas fa-cogs"></i> Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="connectionsBody">
-                        {{range .ActiveConnections}}
-                        <tr class="connection-row" data-source="{{.SourceIP}}" data-dest="{{.DestinationIP}}">
-                            <td class="source-cell">
-                                <span class="ip clickable-ip" onclick="showSourceIPManagement('{{.SourceIP}}')">
-                                    <i class="fas fa-mouse-pointer"></i>
-                                    {{.SourceIP}}
-                                </span>
-                                <span class="port">:{{.SourcePort}}</span>
-                            </td>
-                            <td class="dest-cell">
-                                <span class="ip">{{.DestinationIP}}</span>
-                                <span class="port">:{{.DestinationPort}}</span>
-                            </td>
-                            <td class="lb-cell">
-                                <i class="fas fa-server"></i>
-                                LB{{add .LBIndex 1}}
-                            </td>
-                            <td class="duration-cell">
-                                <i class="fas fa-stopwatch"></i>
-                                {{duration .StartTime}}
-                            </td>
-                            <td class="traffic-cell">
-                                <div class="traffic-info">
-                                    <span class="bytes-in">
-                                        <i class="fas fa-arrow-down"></i>
-                                        {{formatBytes .BytesIn}}
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Load Balancer</th>
+                                <th>Interface</th>
+                                <th>Status</th>
+                                <th>Total Connections</th>
+                                <th>Success Rate</th>
+                                <th>Failures</th>
+                                <th>Ratio</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .LoadBalancers}}
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="status-ball {{if .Enabled}}success{{else}}neutral{{end}}"></div>
+                                        LB {{.ID}}
+                                    </div>
+                                </td>
+                                <td>
+                                    <div>
+                                        <div class="font-weight-bold">{{.Interface}}</div>
+                                        <div class="text-tertiary font-size-sm">{{.Address}}</div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="text-{{if .Enabled}}success{{else}}tertiary{{end}}">
+                                        {{if .Enabled}}Enabled{{else}}Disabled{{end}}
                                     </span>
-                                    <span class="bytes-out">
-                                        <i class="fas fa-arrow-up"></i>
-                                        {{formatBytes .BytesOut}}
+                                </td>
+                                <td>{{.TotalConnections}}</td>
+                                <td>
+                                    <span class="text-{{if gt .SuccessRate 90.0}}success{{else if gt .SuccessRate 70.0}}warning{{else}}danger{{end}}">
+                                        {{printf "%.1f%%" .SuccessRate}}
                                     </span>
+                                </td>
+                                <td>
+                                    <span class="text-{{if eq .FailureCount 0}}success{{else}}danger{{end}}">
+                                        {{.FailureCount}}
+                                    </span>
+                                </td>
+                                <td>{{.DefaultRatio}}</td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Configuration -->
+            <section class="table-container">
+                <div class="table-header">
+                    <h2 class="table-title">
+                        <i class="fas fa-cog"></i>
+                        Configuration
+                    </h2>
+                </div>
+                <div class="table-wrapper">
+                    <div class="load-balancer-body">
+                        <div class="interface-item">
+                            <div class="interface-info">
+                                <i class="fas fa-tag text-tertiary"></i>
+                                <div>
+                                    <div class="interface-name">Version</div>
+                                    <div class="interface-ip">{{.SystemInfo.Version}}</div>
                                 </div>
-                            </td>
-                            <td class="status-cell">
-                                <span class="status {{.Status}}">
-                                    <i class="fas fa-circle"></i>
-                                    {{.Status}}
-                                </span>
-                            </td>
-                            <td class="actions-cell">
-                                <button class="btn btn-small btn-primary" 
-                                        onclick="showWeightModal('{{.SourceIP}}')">
-                                    <i class="fas fa-weight-hanging"></i>
-                                    Set Weight
-                                </button>
-                            </td>
-                        </tr>
-                        {{end}}
-                    </tbody>
-                </table>
-                {{else}}
-                <div class="no-connections">
-                    <i class="fas fa-info-circle"></i>
-                    <p>No active connections</p>
-                    <small>Start using the SOCKS proxy to see real-time connections here</small>
-                </div>
-                {{end}}
-            </div>
-        </div>
-
-        <!-- Active Source IPs -->
-        {{if .ActiveSources}}
-        <div class="section">
-            <h2><i class="fas fa-globe"></i> Active Source IPs</h2>
-            <div class="sources-table">
-                <table class="unifi-table">
-                    <thead>
-                        <tr>
-                            <th><i class="fas fa-map-marker-alt"></i> Source IP</th>
-                            <th><i class="fas fa-link"></i> Active Connections</th>
-                            <th><i class="fas fa-server"></i> Assigned LB</th>
-                            <th><i class="fas fa-weight-hanging"></i> Effective Ratio</th>
-                            <th><i class="fas fa-cogs"></i> Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{range .ActiveSources}}
-                        <tr>
-                            <td>
-                                <span class="ip clickable-ip" onclick="showSourceIPManagement('{{.SourceIP}}')">
-                                    <i class="fas fa-mouse-pointer"></i>
-                                    {{.SourceIP}}
-                                </span>
-                            </td>
-                            <td>
-                                <i class="fas fa-list-ol"></i>
-                                {{.ActiveConnections}}
-                            </td>
-                            <td>
-                                <i class="fas fa-server"></i>
-                                {{.AssignedLB}}
-                            </td>
-                            <td>
-                                <i class="fas fa-percentage"></i>
-                                {{.EffectiveRatio}}
-                            </td>
-                            <td>
-                                <button class="btn btn-primary" 
-                                        onclick="showSourceIPManagement('{{.SourceIP}}')">
-                                    <i class="fas fa-cogs"></i>
-                                    Manage Rules
-                                </button>
-                            </td>
-                        </tr>
-                        {{end}}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {{end}}
-
-        <!-- Configuration -->
-        <div class="section">
-            <h2><i class="fas fa-cog"></i> Configuration</h2>
-            <div class="config-grid">
-                <div class="config-item">
-                    <i class="fas fa-tag"></i>
-                    <div class="config-content">
-                        <strong>Version</strong>
-                        <span>{{.SystemInfo.Version}}</span>
+                            </div>
+                        </div>
+                        <div class="interface-item">
+                            <div class="interface-info">
+                                <i class="fas fa-file text-tertiary"></i>
+                                <div>
+                                    <div class="interface-name">Config File</div>
+                                    <div class="interface-ip">{{.SystemInfo.ConfigFile}}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="interface-item">
+                            <div class="interface-info">
+                                <i class="fas fa-network-wired text-tertiary"></i>
+                                <div>
+                                    <div class="interface-name">Listen Address</div>
+                                    <div class="interface-ip">{{.SystemInfo.ListenAddress}}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="interface-item">
+                            <div class="interface-info">
+                                <i class="fas fa-calendar-alt text-tertiary"></i>
+                                <div>
+                                    <div class="interface-name">Started</div>
+                                    <div class="interface-ip">{{.SystemInfo.StartTime.Format "2006-01-02 15:04:05"}}</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="config-item">
-                    <i class="fas fa-file"></i>
-                    <div class="config-content">
-                        <strong>Config File</strong>
-                        <span>{{.SystemInfo.ConfigFile}}</span>
-                    </div>
-                </div>
-                <div class="config-item">
-                    <i class="fas fa-network-wired"></i>
-                    <div class="config-content">
-                        <strong>Listen Address</strong>
-                        <span>{{.SystemInfo.ListenAddress}}</span>
-                    </div>
-                </div>
-                <div class="config-item">
-                    <i class="fas fa-calendar-alt"></i>
-                    <div class="config-content">
-                        <strong>Started</strong>
-                        <span>{{.SystemInfo.StartTime.Format "2006-01-02 15:04:05"}}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
+            </section>
+        </main>
     </div>
 
-    <!-- Add Rule Modal -->
+    <!-- Add Source IP Rule Modal -->
     <div id="addRuleModal" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="closeModal('addRuleModal')">&times;</span>
-            <h3>Add Source IP Rule</h3>
-            <form id="addRuleForm">
-                <input type="hidden" id="modalLBAddress" name="lb_address">
-                <div class="form-group">
-                    <label for="sourceIP">Source IP/CIDR:</label>
-                    <input type="text" id="sourceIP" name="source_ip" required 
-                           placeholder="192.168.1.100 or 10.0.0.0/24">
-                </div>
-                <div class="form-group">
-                    <label for="contentionRatio">Contention Ratio:</label>
-                    <input type="number" id="contentionRatio" name="contention_ratio" 
-                           min="1" max="100" value="1" required>
-                    <small>Higher values = more priority for this source IP</small>
-                </div>
-                <div class="form-group">
-                    <label for="description">Description:</label>
-                    <input type="text" id="description" name="description" 
-                           placeholder="e.g., High priority client">
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('addRuleModal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add Rule</button>
-                </div>
-            </form>
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-plus"></i>
+                    Add Source IP Rule
+                </h3>
+                <button class="modal-close" onclick="closeModal('addRuleModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="addRuleForm">
+                    <input type="hidden" id="modalLBAddress" name="lb_address">
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fas fa-map-marker-alt"></i>
+                            Source IP/CIDR
+                        </label>
+                        <input type="text" id="sourceIP" class="form-control" 
+                               placeholder="192.168.1.100 or 10.0.0.0/24" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fas fa-weight-hanging"></i>
+                            Contention Ratio
+                        </label>
+                        <input type="number" id="contentionRatio" class="form-control" 
+                               min="1" max="100" value="1" required>
+                        <small class="text-tertiary">Higher values = more priority for this source IP</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fas fa-comment"></i>
+                            Description
+                        </label>
+                        <input type="text" id="description" class="form-control" 
+                               placeholder="e.g., High priority client">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addRuleModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="addSourceIPRule()">
+                    <i class="fas fa-plus"></i>
+                    Add Rule
+                </button>
+            </div>
         </div>
     </div>
 
     <!-- Set Weight Modal -->
     <div id="weightModal" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="closeModal('weightModal')">&times;</span>
-            <h3>Manage Load Balancing for Source IP</h3>
-            <form id="weightForm">
-                <input type="hidden" id="weightSourceIP" name="source_ip">
-                <div class="form-group">
-                    <label>Source IP:</label>
-                    <span id="weightSourceIPDisplay" class="readonly-field"></span>
-                </div>
-                <div class="form-group">
-                    <label for="weightLBSelect">Target Load Balancer:</label>
-                    <select id="weightLBSelect" name="lb_address" required>
-                        {{range .LoadBalancers}}
-                        <option value="{{.Address}}">LB{{.ID}}: {{.Address}} ({{.Interface}})</option>
-                        {{end}}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="weightRatio">Contention Ratio:</label>
-                    <input type="number" id="weightRatio" name="contention_ratio" 
-                           min="1" max="100" value="1" required>
-                    <small>Higher values = more priority for this source IP on selected LB</small>
-                </div>
-                <div class="form-group">
-                    <label for="weightDescription">Description:</label>
-                    <input type="text" id="weightDescription" name="description" 
-                           placeholder="e.g., VIP client high priority">
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('weightModal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Set Weight</button>
-                </div>
-            </form>
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-weight-hanging"></i>
+                    Manage Load Balancing for Source IP
+                </h3>
+                <button class="modal-close" onclick="closeModal('weightModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="weightForm">
+                    <input type="hidden" id="weightSourceIP" name="source_ip">
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fas fa-map-marker-alt"></i>
+                            Source IP
+                        </label>
+                        <span id="weightSourceIPDisplay" class="form-control" style="background: var(--unifi-bg-tertiary); cursor: not-allowed;"></span>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fas fa-server"></i>
+                            Target Load Balancer
+                        </label>
+                        <select id="weightLBSelect" name="lb_address" class="form-control" required>
+                            {{range .LoadBalancers}}
+                            <option value="{{.Address}}">LB{{.ID}}: {{.Address}} ({{.Interface}})</option>
+                            {{end}}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fas fa-weight-hanging"></i>
+                            Contention Ratio
+                        </label>
+                        <input type="number" id="weightRatio" name="contention_ratio" class="form-control"
+                               min="1" max="100" value="1" required>
+                        <small class="text-tertiary">Higher values = more priority for this source IP on selected LB</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fas fa-comment"></i>
+                            Description
+                        </label>
+                        <input type="text" id="weightDescription" name="description" class="form-control"
+                               placeholder="e.g., VIP client high priority">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('weightModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="setWeight()">
+                    <i class="fas fa-check"></i>
+                    Set Weight
+                </button>
+            </div>
         </div>
     </div>
 
-    <!-- Add Rule Modal -->
-    <div id="addRuleModal" class="modal">
+    <!-- View Rules Modal -->
+    <div id="viewRulesModal" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="closeModal('addRuleModal')">&times;</span>
-            <h3><i class="fas fa-plus"></i> Add Source IP Rule</h3>
-            <form id="addRuleForm">
-                <input type="hidden" id="modalLBAddress" name="lb_address">
-                <div class="form-group">
-                    <label for="sourceIP"><i class="fas fa-map-marker-alt"></i> Source IP/CIDR:</label>
-                    <input type="text" id="sourceIP" name="source_ip" required 
-                           placeholder="192.168.1.100 or 10.0.0.0/24">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-filter"></i>
+                    Source IP Rules
+                </h3>
+                <button class="modal-close" onclick="closeModal('viewRulesModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="rulesContent">
+                    <!-- Rules will be loaded here -->
                 </div>
-                <div class="form-group">
-                    <label for="contentionRatio"><i class="fas fa-weight-hanging"></i> Contention Ratio:</label>
-                    <input type="number" id="contentionRatio" name="contention_ratio" 
-                           min="1" max="100" value="1" required>
-                    <small>Higher values = more priority for this source IP</small>
-                </div>
-                <div class="form-group">
-                    <label for="description"><i class="fas fa-comment"></i> Description:</label>
-                    <input type="text" id="description" name="description" 
-                           placeholder="e.g., High priority client">
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-outline" onclick="closeModal('addRuleModal')">
-                        <i class="fas fa-times"></i> Cancel
-                    </button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-check"></i> Add Rule
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Set Weight Modal -->
-    <div id="weightModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeModal('weightModal')">&times;</span>
-            <h3><i class="fas fa-weight-hanging"></i> Manage Load Balancing for Source IP</h3>
-            <form id="weightForm">
-                <input type="hidden" id="weightSourceIP" name="source_ip">
-                <div class="form-group">
-                    <label><i class="fas fa-map-marker-alt"></i> Source IP:</label>
-                    <span id="weightSourceIPDisplay" class="readonly-field"></span>
-                </div>
-                <div class="form-group">
-                    <label for="weightLBSelect"><i class="fas fa-server"></i> Target Load Balancer:</label>
-                    <select id="weightLBSelect" name="lb_address" required>
-                        {{range .LoadBalancers}}
-                        <option value="{{.Address}}">LB{{.ID}}: {{.Address}} ({{.Interface}})</option>
-                        {{end}}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="weightRatio"><i class="fas fa-weight-hanging"></i> Contention Ratio:</label>
-                    <input type="number" id="weightRatio" name="contention_ratio" 
-                           min="1" max="100" value="1" required>
-                    <small>Higher values = more priority for this source IP on selected LB</small>
-                </div>
-                <div class="form-group">
-                    <label for="weightDescription"><i class="fas fa-comment"></i> Description:</label>
-                    <input type="text" id="weightDescription" name="description" 
-                           placeholder="e.g., VIP client high priority">
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-outline" onclick="closeModal('weightModal')">
-                        <i class="fas fa-times"></i> Cancel
-                    </button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-check"></i> Set Weight
-                    </button>
-                </div>
-            </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('viewRulesModal')">Close</button>
+            </div>
         </div>
     </div>
 
     <!-- Source IP Management Modal -->
     <div id="sourceIPModal" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="closeModal('sourceIPModal')">&times;</span>
-            <h3><i class="fas fa-cogs"></i> Manage Load Balancing Rules</h3>
-            <div id="sourceIPModalContent">
-                <!-- Content will be loaded dynamically -->
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-cogs"></i>
+                    Manage Load Balancing Rules
+                </h3>
+                <button class="modal-close" onclick="closeModal('sourceIPModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="sourceIPModalContent">
+                    <!-- Content will be loaded dynamically -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('sourceIPModal')">Close</button>
             </div>
         </div>
     </div>
 
+    <!-- JavaScript -->
     <script src="/static/js/main.js"></script>
     <script src="/static/js/dashboard.js"></script>
     <script>

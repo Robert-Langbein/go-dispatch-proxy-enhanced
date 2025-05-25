@@ -77,6 +77,7 @@ type GlobalTrafficStats struct {
 	BytesInPerSecond     int64   `json:"bytes_in_per_second"`
 	BytesOutPerSecond    int64   `json:"bytes_out_per_second"`
 	ConnectionsPerMinute int64   `json:"connections_per_minute"`
+	ConnectionsPerSecond int64   `json:"connections_per_second"`
 	ActiveConnections    int     `json:"active_connections"`
 	TotalConnections     int     `json:"total_connections"`
 	UptimeSeconds        float64 `json:"uptime_seconds"`
@@ -845,6 +846,7 @@ func (ws *WebServer) getDashboardData() DashboardData {
 		data.TrafficStats.BytesOutPerSecond = getCurrentBytesOutPerSecond()
 		data.TrafficStats.BytesPerSecond = getCurrentBytesPerSecond()
 		data.TrafficStats.ConnectionsPerMinute = int64(float64(data.TotalConnections) / uptime.Minutes())
+		data.TrafficStats.ConnectionsPerSecond = int64(float64(data.TotalConnections) / uptime.Seconds())
 	}
 	
 	return data
