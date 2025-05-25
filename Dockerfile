@@ -10,6 +10,7 @@
     FROM alpine:latest
     COPY --from=build /go-dispatch-proxy /usr/local/bin/go-dispatch-proxy
     EXPOSE 33333/tcp
+    EXPOSE 8090/tcp
     
     COPY entrypoint.sh /entrypoint.sh
     RUN chmod +x /entrypoint.sh
