@@ -1,0 +1,7 @@
+services:
+  dispatch-proxy:
+    build: .
+    container_name: dispatch-proxy
+    network_mode: host        # Host-Namespace
+    cap_add: [ NET_RAW ]      # nötig für SO_BINDTODEVICE
+    restart: unless-stopped
