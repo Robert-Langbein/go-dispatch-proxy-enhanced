@@ -7,12 +7,13 @@
     RUN go build -o /go-dispatch-proxy .
     
     # ---- Runtime-Stage --------------------------------------------------------
-    FROM alpine:latest
-    COPY --from=build /go-dispatch-proxy /usr/local/bin/go-dispatch-proxy
-    EXPOSE 33333/tcp
-    EXPOSE 8090/tcp
-    
-    COPY entrypoint.sh /entrypoint.sh
-    RUN chmod +x /entrypoint.sh
-    ENTRYPOINT ["/entrypoint.sh"]
-    # ENTRYPOINT ["go-dispatch-proxy"]
+FROM alpine:latest
+COPY --from=build /go-dispatch-proxy /usr/local/bin/go-dispatch-proxy
+COPY --from=build /src/web /web
+EXPOSE 33333/tcp
+EXPOSE 8090/tcp
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+# ENTRYPOINT ["go-dispatch-proxy"]
