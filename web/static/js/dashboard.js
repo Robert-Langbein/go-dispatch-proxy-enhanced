@@ -190,9 +190,14 @@ function updateTrafficBars() {
                 if (bar) {
                     const percentage = (lb.total_connections / totalConnections) * 100;
                     bar.style.width = percentage + '%';
-                    const textEl = bar.querySelector('.traffic-bar-text');
-                    if (textEl) {
-                        textEl.textContent = lb.total_connections + ' connections (' + percentage.toFixed(1) + '%)';
+                    
+                    // Update the traffic stats display
+                    const trafficBar = bar.closest('.lb-traffic-bar');
+                    if (trafficBar) {
+                        const statsEl = trafficBar.querySelector('.lb-traffic-stats');
+                        if (statsEl) {
+                            statsEl.textContent = lb.total_connections + ' connections (' + percentage.toFixed(1) + '%)';
+                        }
                     }
                 }
             });
@@ -215,6 +220,45 @@ function startTrafficRefresh() {
 function stopTrafficRefresh() {
     if (trafficRefreshInterval) {
         clearInterval(trafficRefreshInterval);
+    }
+}
+
+// Theme Toggle Functionality
+function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    
+    // Update toggle button
+    const themeIcon = document.querySelector('.theme-icon');
+    const themeText = document.querySelector('.theme-text');
+    
+    if (newTheme === 'dark') {
+        themeIcon.className = 'fas fa-sun theme-icon';
+        themeText.textContent = 'Light';
+    } else {
+        themeIcon.className = 'fas fa-moon theme-icon';
+        themeText.textContent = 'Dark';
+    }
+}
+
+// Initialize theme on page load
+function initializeTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    
+    // Update toggle button
+    const themeIcon = document.querySelector('.theme-icon');
+    const themeText = document.querySelector('.theme-text');
+    
+    if (savedTheme === 'dark') {
+        themeIcon.className = 'fas fa-sun theme-icon';
+        themeText.textContent = 'Light';
+    } else {
+        themeIcon.className = 'fas fa-moon theme-icon';
+        themeText.textContent = 'Dark';
     }
 }
 
@@ -373,6 +417,8 @@ async function removeSourceIPRule(lbAddress, sourceIP) {
 
 // Form Submissions
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize theme first
+    initializeTheme();
     // Add Rule Form
     const addRuleForm = document.getElementById('addRuleForm');
     if (addRuleForm) {
