@@ -379,7 +379,7 @@ func update_connection_traffic(conn_id string, bytes_in, bytes_out int64) {
 			mutex.Lock()
 			lb_list[lb_index].bytes_transferred += bytes_in + bytes_out
 			lb_list[lb_index].last_traffic_update = time.Now()
-			mutex.Unlock()
+	mutex.Unlock()
 		}
 	}
 }
