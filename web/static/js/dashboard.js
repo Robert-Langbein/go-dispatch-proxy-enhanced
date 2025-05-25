@@ -155,28 +155,51 @@ function updateConnectionsTable(connections) {
         const duration = formatDuration(new Date(conn.start_time));
         
         row.innerHTML = '' +
-            '<td class="source-cell">' +
-                '<span class="ip clickable-ip" onclick="showSourceIPManagement(\'' + conn.source_ip + '\')">' + conn.source_ip + '</span>' +
-                '<span class="port">:' + conn.source_port + '</span>' +
-            '</td>' +
-            '<td class="dest-cell">' +
-                '<span class="ip">' + conn.destination_ip + '</span>' +
-                '<span class="port">:' + conn.destination_port + '</span>' +
-            '</td>' +
-            '<td class="lb-cell">LB' + (conn.lb_index + 1) + '</td>' +
-            '<td class="duration-cell">' + duration + '</td>' +
-            '<td class="traffic-cell">' +
-                '<div class="traffic-info">' +
-                    '<span class="bytes-in">↓' + formatBytes(conn.bytes_in) + '</span>' +
-                    '<span class="bytes-out">↑' + formatBytes(conn.bytes_out) + '</span>' +
+            '<td>' +
+                '<div class="d-flex align-items-center">' +
+                    '<span class="font-weight-bold text-primary" onclick="showSourceIPManagement(\'' + conn.source_ip + '\')" style="cursor: pointer;">' + conn.source_ip + '</span>' +
+                    '<span class="text-tertiary">:' + conn.source_port + '</span>' +
                 '</div>' +
             '</td>' +
-            '<td class="status-cell">' +
-                '<span class="status ' + conn.status + '">' + conn.status + '</span>' +
+            '<td>' +
+                '<div class="d-flex align-items-center">' +
+                    '<span class="font-weight-bold">' + conn.destination_ip + '</span>' +
+                    '<span class="text-tertiary">:' + conn.destination_port + '</span>' +
+                '</div>' +
             '</td>' +
-            '<td class="actions-cell">' +
-                '<button class="btn btn-small btn-primary" ' +
-                        'onclick="showWeightModal(\'' + conn.source_ip + '\')">' +
+            '<td>' +
+                '<div class="d-flex align-items-center">' +
+                    '<i class="fas fa-server text-tertiary"></i>' +
+                    '<span class="ml-2">LB' + (conn.lb_index + 1) + '</span>' +
+                '</div>' +
+            '</td>' +
+            '<td>' +
+                '<div class="d-flex align-items-center">' +
+                    '<i class="fas fa-stopwatch text-tertiary"></i>' +
+                    '<span class="ml-2">' + duration + '</span>' +
+                '</div>' +
+            '</td>' +
+            '<td>' +
+                '<div class="d-flex flex-column">' +
+                    '<span class="text-success">' +
+                        '<i class="fas fa-arrow-down"></i>' +
+                        formatBytes(conn.bytes_in) +
+                    '</span>' +
+                    '<span class="text-info">' +
+                        '<i class="fas fa-arrow-up"></i>' +
+                        formatBytes(conn.bytes_out) +
+                    '</span>' +
+                '</div>' +
+            '</td>' +
+            '<td>' +
+                '<div class="d-flex align-items-center">' +
+                    '<div class="status-ball ' + conn.status + '"></div>' +
+                    '<span class="text-' + conn.status + '">' + conn.status + '</span>' +
+                '</div>' +
+            '</td>' +
+            '<td>' +
+                '<button class="btn btn-sm btn-primary" onclick="showWeightModal(\'' + conn.source_ip + '\')">' +
+                    '<i class="fas fa-weight-hanging"></i>' +
                     'Set Weight' +
                 '</button>' +
             '</td>';

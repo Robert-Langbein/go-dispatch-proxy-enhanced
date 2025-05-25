@@ -14,29 +14,32 @@
         <!-- UniFi Style Header -->
         <header class="header">
             <div class="header-left">
-                <a href="#" class="header-logo">
-                    <i class="fas fa-network-wired"></i>
-                    UniFi
-                </a>
-                <h1 class="header-title">Go Dispatch Proxy Enhanced</h1>
+                <div class="header-logo">
+                    <span class="logo-text">UniFi</span>
+                </div>
+                <nav class="header-nav">
+                    <a href="#" class="nav-item active">Dashboard</a>
+                    <a href="#" class="nav-item">Network</a>
+                    <a href="#" class="nav-item">Devices</a>
+                    <a href="#" class="nav-item">Settings</a>
+                </nav>
             </div>
             <div class="header-right">
-                <div class="header-user">
-                    <i class="fas fa-user-circle"></i>
-                    <span>admin</span>
+                <div class="header-actions">
+                    <button class="header-btn" onclick="refreshDashboard()" title="Refresh">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button class="header-btn" title="Notifications">
+                        <i class="fas fa-bell"></i>
+                    </button>
+                    <div class="header-user">
+                        <i class="fas fa-user-circle"></i>
+                        <span>admin</span>
+                    </div>
+                    <a href="/logout" class="header-btn logout-btn" title="Logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </a>
                 </div>
-                <div class="status-indicator {{if gt .SystemInfo.TotalLBs 0}}success{{else}}neutral{{end}}">
-                    <div class="status-ball {{if gt .SystemInfo.TotalLBs 0}}success{{else}}neutral{{end}}"></div>
-                    <span>{{if gt .SystemInfo.TotalLBs 0}}Online{{else}}Offline{{end}}</span>
-                </div>
-                <button class="btn btn-secondary" onclick="refreshDashboard()">
-                    <i class="fas fa-sync-alt"></i>
-                    Refresh
-                </button>
-                <a href="/logout" class="btn btn-danger">
-                    <i class="fas fa-sign-out-alt"></i>
-                    Logout
-                </a>
             </div>
         </header>
 
