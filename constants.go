@@ -18,9 +18,9 @@ const (
 
 // ADDRTYPE
 const (
-	IPV4   = 1 + iota
-	DOMAIN = 2 + iota
-	IPV6   = 2 + iota
+	IPV4   = 1
+	DOMAIN = 3
+	IPV6   = 4
 )
 
 // REQUEST_STATUS

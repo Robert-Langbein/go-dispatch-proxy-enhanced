@@ -118,6 +118,25 @@ func client_conection_request(conn net.Conn) (string, error) {
 		}
 		address = fmt.Sprintf("%s:%d", string(domain_name), binary.BigEndian.Uint16(port))
 
+	case IPV6:
+		ipv6_address := make([]byte, 16)
+
+		if nRead, err := conn.Read(ipv6_address); err != nil || nRead != len(ipv6_address) {
+			conn.Write([]byte{5, SERVER_FAILURE, 0, 1, 0, 0, 0, 0, 0, 0})
+			conn.Close()
+			return "", errors.New("[WARN] client connection request failed")
+		}
+
+		if nRead, err := conn.Read(port); err != nil || nRead != len(port) {
+			conn.Write([]byte{5, SERVER_FAILURE, 0, 1, 0, 0, 0, 0, 0, 0})
+			conn.Close()
+			return "", errors.New("[WARN] client connection request failed")
+		}
+		
+		// Format IPv6 address
+		ip := net.IP(ipv6_address)
+		address = fmt.Sprintf("[%s]:%d", ip.String(), binary.BigEndian.Uint16(port))
+
 	default:
 		conn.Write([]byte{5, ADDRTYPE_NOT_SUPPORTED, 0, 1, 0, 0, 0, 0, 0, 0})
 		conn.Close()

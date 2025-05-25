@@ -696,7 +696,16 @@ func parse_load_balancers(args []string, tunnel bool) {
 		}
 
 		log.Printf("[INFO] Load balancer %d: %s%s, contention ratio: %d\n", idx+1, lb_ip_or_fqdn, slbport, cont_ratio)
-		lb_list[idx] = enhanced_load_balancer{address: fmt.Sprintf("%s:%d", lb_ip_or_fqdn, lb_port), iface: iface, contention_ratio: cont_ratio, current_connections: 0, source_ip_rules: make(map[string]source_ip_rule), source_ip_counters: make(map[string]int), total_connections: 0, success_count: 0, failure_count: 0, enabled: true}
+		
+		// Store address differently for tunnel vs non-tunnel mode
+		var address string
+		if tunnel {
+			address = fmt.Sprintf("%s:%d", lb_ip_or_fqdn, lb_port)
+		} else {
+			address = lb_ip_or_fqdn // Only IP for non-tunnel mode
+		}
+		
+		lb_list[idx] = enhanced_load_balancer{address: address, iface: iface, contention_ratio: cont_ratio, current_connections: 0, source_ip_rules: make(map[string]source_ip_rule), source_ip_counters: make(map[string]int), total_connections: 0, success_count: 0, failure_count: 0, enabled: true}
 	}
 }
 
