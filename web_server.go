@@ -275,6 +275,7 @@ func (ws *WebServer) Start() error {
 	http.HandleFunc("/api/reset", ws.handleAPIReset)
 	http.HandleFunc("/api/restart", ws.handleAPIRestart)
 	http.HandleFunc("/settings", ws.handleSettings)
+	http.HandleFunc("/network", ws.handleNetwork)
 	http.HandleFunc("/static/", ws.handleStatic)
 	
 	log.Printf("[INFO] Web GUI started on http://0.0.0.0%s", ws.server.Addr)
@@ -1138,8 +1139,6 @@ func (ws *WebServer) handleAPIGatewayToggle(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(response)
 }
 
-
-
 /*
 Handle Gateway Configuration API endpoint
 */
@@ -1881,4 +1880,40 @@ func (ws *WebServer) handleAPIRestart(w http.ResponseWriter, r *http.Request) {
 			os.Exit(1)
 		}
 	}()
+}
+
+/*
+Handle network topology page
+*/
+func (ws *WebServer) handleNetwork(w http.ResponseWriter, r *http.Request) {
+	// Check authentication first
+	sessionID, err := r.Cookie("session")
+	if err != nil || sessionID == nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	ws.sessionMutex.RLock()
+	sessionTime, exists := ws.sessions[sessionID.Value]
+	ws.sessionMutex.RUnlock()
+
+	if !exists || time.Since(sessionTime) > 24*time.Hour {
+		// Session expired or doesn't exist
+		ws.sessionMutex.Lock()
+		delete(ws.sessions, sessionID.Value)
+		ws.sessionMutex.Unlock()
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	// Update session timestamp
+	ws.sessionMutex.Lock()
+	ws.sessions[sessionID.Value] = time.Now()
+	ws.sessionMutex.Unlock()
+
+	// Set content type
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	
+	// Serve network topology template
+	http.ServeFile(w, r, "web/templates/network.html")
 }

@@ -1,0 +1,501 @@
+/* Network Topology CSS - UniFi Style */
+:root {
+    --topology-bg: #0e1419;
+    --topology-bg-light: #1a1f25;
+    --topology-grid: rgba(255, 255, 255, 0.05);
+    --topology-accent: #00d4ff;
+    --topology-accent-hover: #00b8e6;
+    --high-traffic: #ff4757;
+    --medium-traffic: #ffa502;
+    --low-traffic: #2ed573;
+    --proxy-color: #5b73e8;
+    --lb-color: #f39c12;
+    --client-color: #6c757d;
+}
+
+/* Topology Header */
+.topology-header {
+    background: var(--unifi-bg-primary);
+    border-bottom: 1px solid var(--unifi-border-primary);
+    padding: var(--unifi-space-6);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--unifi-space-4);
+}
+
+.topology-title h1 {
+    color: var(--unifi-text-primary);
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+    display: flex;
+    align-items: center;
+    gap: var(--unifi-space-2);
+}
+
+.topology-subtitle {
+    color: var(--unifi-text-secondary);
+    margin: 0;
+    font-size: 14px;
+}
+
+/* Topology Controls */
+.topology-controls {
+    display: flex;
+    gap: var(--unifi-space-4);
+    align-items: center;
+}
+
+.control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.control-group label {
+    font-size: 12px;
+    color: var(--unifi-text-secondary);
+    font-weight: 500;
+}
+
+.control-group select {
+    background: var(--unifi-bg-secondary);
+    border: 1px solid var(--unifi-border-primary);
+    color: var(--unifi-text-primary);
+    padding: 6px 12px;
+    border-radius: var(--unifi-radius-sm);
+    font-size: 14px;
+    min-width: 140px;
+}
+
+.control-group input[type="range"] {
+    width: 100px;
+    accent-color: var(--unifi-accent-primary);
+}
+
+#speedValue {
+    font-size: 12px;
+    color: var(--unifi-text-secondary);
+    text-align: center;
+    min-width: 30px;
+}
+
+/* Network Statistics */
+.network-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--unifi-space-4);
+    padding: var(--unifi-space-6);
+    background: var(--unifi-bg-primary);
+}
+
+.stat-card {
+    background: var(--unifi-bg-secondary);
+    border: 1px solid var(--unifi-border-primary);
+    border-radius: var(--unifi-radius-md);
+    padding: var(--unifi-space-4);
+    display: flex;
+    align-items: center;
+    gap: var(--unifi-space-3);
+    transition: all 0.2s ease;
+}
+
+.stat-card:hover {
+    background: var(--unifi-bg-hover);
+    border-color: var(--unifi-border-hover);
+}
+
+.stat-icon {
+    width: 48px;
+    height: 48px;
+    background: var(--unifi-accent-primary);
+    border-radius: var(--unifi-radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 20px;
+}
+
+.stat-content h3 {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0;
+    color: var(--unifi-text-primary);
+}
+
+.stat-content p {
+    font-size: 14px;
+    color: var(--unifi-text-secondary);
+    margin: 4px 0 0 0;
+}
+
+/* Topology Container */
+.topology-container {
+    display: flex;
+    height: calc(100vh - 350px);
+    background: var(--topology-bg);
+    position: relative;
+}
+
+.topology-canvas {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: 
+        linear-gradient(var(--topology-grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--topology-grid) 1px, transparent 1px);
+    background-size: 20px 20px;
+}
+
+.topology-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: var(--unifi-text-secondary);
+}
+
+.topology-loading i {
+    font-size: 32px;
+    margin-bottom: 16px;
+    color: var(--unifi-accent-primary);
+}
+
+/* D3.js Visualization Styles */
+.node {
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.node:hover {
+    filter: brightness(1.2);
+}
+
+.node-circle {
+    stroke-width: 3;
+    transition: all 0.3s ease;
+}
+
+.node-circle.proxy {
+    fill: var(--proxy-color);
+    stroke: var(--proxy-color);
+}
+
+.node-circle.load-balancer {
+    fill: var(--lb-color);
+    stroke: var(--lb-color);
+}
+
+.node-circle.client {
+    fill: var(--client-color);
+    stroke: var(--client-color);
+}
+
+.node-label {
+    fill: var(--unifi-text-primary);
+    font-family: var(--unifi-font-family);
+    font-size: 12px;
+    font-weight: 500;
+    text-anchor: middle;
+    pointer-events: none;
+}
+
+.node-stats {
+    fill: var(--unifi-text-secondary);
+    font-family: var(--unifi-font-family);
+    font-size: 10px;
+    text-anchor: middle;
+    pointer-events: none;
+}
+
+/* Connection Lines */
+.link {
+    stroke-width: 2;
+    opacity: 0.8;
+    transition: all 0.3s ease;
+}
+
+.link.high-traffic {
+    stroke: var(--high-traffic);
+    stroke-width: 4;
+}
+
+.link.medium-traffic {
+    stroke: var(--medium-traffic);
+    stroke-width: 3;
+}
+
+.link.low-traffic {
+    stroke: var(--low-traffic);
+    stroke-width: 2;
+}
+
+/* Animated Flow Particles */
+.flow-particle {
+    fill: currentColor;
+    opacity: 0.8;
+}
+
+@keyframes flowAnimation {
+    0% {
+        offset-distance: 0%;
+        opacity: 0;
+    }
+    10% {
+        opacity: 1;
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        offset-distance: 100%;
+        opacity: 0;
+    }
+}
+
+.flow-particles {
+    animation: flowAnimation 2s linear infinite;
+}
+
+/* Legend */
+.topology-legend {
+    background: var(--unifi-bg-secondary);
+    border-left: 1px solid var(--unifi-border-primary);
+    padding: var(--unifi-space-4);
+    width: 200px;
+    overflow-y: auto;
+}
+
+.topology-legend h4 {
+    color: var(--unifi-text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 16px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--unifi-border-primary);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: var(--unifi-text-secondary);
+}
+
+.legend-icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.legend-icon.proxy-icon {
+    background: var(--proxy-color);
+}
+
+.legend-icon.lb-icon {
+    background: var(--lb-color);
+}
+
+.legend-icon.client-icon {
+    background: var(--client-color);
+}
+
+.legend-line {
+    width: 20px;
+    height: 3px;
+    flex-shrink: 0;
+}
+
+.legend-line.high-traffic {
+    background: var(--high-traffic);
+    height: 4px;
+}
+
+.legend-line.medium-traffic {
+    background: var(--medium-traffic);
+    height: 3px;
+}
+
+.legend-line.low-traffic {
+    background: var(--low-traffic);
+    height: 2px;
+}
+
+/* Device Details Panel */
+.device-details-panel {
+    position: fixed;
+    top: 100px;
+    right: -400px;
+    width: 380px;
+    height: calc(100vh - 120px);
+    background: var(--unifi-bg-secondary);
+    border: 1px solid var(--unifi-border-primary);
+    border-radius: var(--unifi-radius-md) 0 0 var(--unifi-radius-md);
+    box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15);
+    transition: right 0.3s ease;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+}
+
+.device-details-panel.active {
+    right: 0;
+}
+
+.panel-header {
+    padding: var(--unifi-space-4);
+    border-bottom: 1px solid var(--unifi-border-primary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.panel-header h3 {
+    color: var(--unifi-text-primary);
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.panel-close {
+    background: none;
+    border: none;
+    color: var(--unifi-text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--unifi-radius-sm);
+    transition: all 0.2s ease;
+}
+
+.panel-close:hover {
+    background: var(--unifi-bg-hover);
+    color: var(--unifi-text-primary);
+}
+
+.panel-content {
+    flex: 1;
+    padding: var(--unifi-space-4);
+    overflow-y: auto;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .topology-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .topology-controls {
+        flex-wrap: wrap;
+        justify-content: space-between;
+    }
+    
+    .network-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .topology-container {
+        flex-direction: column;
+        height: auto;
+    }
+    
+    .topology-legend {
+        width: 100%;
+        border-left: none;
+        border-top: 1px solid var(--unifi-border-primary);
+    }
+    
+    .device-details-panel {
+        right: -100%;
+        width: 100%;
+        top: 60px;
+        height: calc(100vh - 60px);
+    }
+}
+
+/* Zoom and Pan Controls */
+.topology-controls-overlay {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.topology-control-btn {
+    width: 40px;
+    height: 40px;
+    background: var(--unifi-bg-secondary);
+    border: 1px solid var(--unifi-border-primary);
+    border-radius: var(--unifi-radius-sm);
+    color: var(--unifi-text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.topology-control-btn:hover {
+    background: var(--unifi-bg-hover);
+    border-color: var(--unifi-border-hover);
+}
+
+/* Performance Optimizations */
+.topology-canvas svg {
+    width: 100%;
+    height: 100%;
+}
+
+.node,
+.link {
+    will-change: transform;
+}
+
+/* Loading States */
+.topology-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+.topology-loading.hidden {
+    display: none;
+}
+
+/* Error States */
+.topology-error {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: var(--unifi-danger);
+    max-width: 400px;
+}
+
+.topology-error i {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.topology-error h3 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+}
+
+.topology-error p {
+    margin: 0;
+    color: var(--unifi-text-secondary);
+    line-height: 1.5;
+} 
