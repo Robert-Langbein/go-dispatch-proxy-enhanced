@@ -853,8 +853,8 @@ func parse_load_balancers(args []string, tunnel bool) {
 Main function
 */
 func main() {
-	// Only keep the web GUI port flag - all other settings are managed via database
-	var webPort = flag.Int("webgui", 8090, "Web GUI port (use 0 to disable)")
+	// Only webgui flag for initial setup - all settings managed via database
+	var webPort = flag.Int("webgui", 8090, "Web GUI port for initial setup (saved to database on first run)")
 	flag.Parse()
 
 	log.Printf("[INFO] Go Dispatch Proxy Enhanced v3.0 - Database Edition")
@@ -866,18 +866,18 @@ func main() {
 	}
 	defer closeDatabase()
 
-	// Load all configuration from database
+	// Initialize webPort from command line flag if this is first startup
+	if err := initializeWebPortFromFlag(*webPort); err != nil {
+		log.Fatalf("[FATAL] Failed to initialize webPort from flag: %v", err)
+	}
+
+	// Load all configuration from database (webPort is now stored there)
 	if err := syncSettingsFromDatabase(); err != nil {
 		log.Fatalf("[FATAL] Failed to load settings from database: %v", err)
 	}
 
 	if err := syncGatewayConfigFromDatabase(); err != nil {
 		log.Fatalf("[FATAL] Failed to load gateway config from database: %v", err)
-	}
-
-	// Override webPort from command line if provided
-	if *webPort != 8090 { // Only override if different from default
-		currentSettings.WebPort = *webPort
 	}
 
 	// Apply loaded settings to global variables

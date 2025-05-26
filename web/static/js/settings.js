@@ -78,7 +78,6 @@ class SettingsManager {
             'lhost': this.currentSettings.listen_host || '127.0.0.1',
             'lport': this.currentSettings.listen_port || 8080,
             'webPort': this.currentSettings.web_port || 0,
-            'configFile': this.currentSettings.config_file || 'source_ip_rules.json',
             'tunnel': this.currentSettings.tunnel_mode || false,
             'debug': this.currentSettings.debug_mode || false
         };
@@ -388,7 +387,6 @@ class SettingsManager {
             listen_host: document.getElementById('lhost')?.value || '127.0.0.1',
             listen_port: parseInt(document.getElementById('lport')?.value) || 8080,
             web_port: parseInt(document.getElementById('webPort')?.value) || 0,
-            config_file: document.getElementById('configFile')?.value || 'source_ip_rules.json',
             tunnel_mode: document.getElementById('tunnel')?.checked || false,
             debug_mode: document.getElementById('debug')?.checked || false,
             
@@ -454,91 +452,7 @@ class SettingsManager {
         }
     }
 
-    // Export configuration
-    async exportConfig() {
-        try {
-            const response = await fetch('/api/export');
-            if (response.ok) {
-                const config = await response.json();
-                const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `dispatch-proxy-config-${new Date().toISOString().split('T')[0]}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                
-                this.showNotification('Configuration exported successfully', 'success');
-            } else {
-                throw new Error('Failed to export configuration');
-            }
-        } catch (error) {
-            console.error('Failed to export config:', error);
-            this.showNotification('Failed to export configuration', 'error');
-        }
-    }
 
-    // Import configuration
-    importConfig() {
-        this.showModal('importModal');
-    }
-
-    // Process import configuration
-    async processImportConfig() {
-        const fileInput = document.getElementById('configUpload');
-        const textInput = document.getElementById('configText');
-        
-        let configData = null;
-        
-        if (fileInput.files[0]) {
-            // Read from file
-            const file = fileInput.files[0];
-            const text = await file.text();
-            try {
-                configData = JSON.parse(text);
-            } catch (error) {
-                this.showNotification('Invalid JSON file', 'error');
-                return;
-            }
-        } else if (textInput.value.trim()) {
-            // Read from textarea
-            try {
-                configData = JSON.parse(textInput.value.trim());
-            } catch (error) {
-                this.showNotification('Invalid JSON format', 'error');
-                return;
-            }
-        } else {
-            this.showNotification('Please select a file or paste configuration', 'error');
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/import', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(configData)
-            });
-
-            if (response.ok) {
-                this.showNotification('Configuration imported successfully', 'success');
-                this.closeModal('importModal');
-                this.refreshSettings();
-                
-                // Clear form
-                fileInput.value = '';
-                textInput.value = '';
-            } else {
-                throw new Error('Failed to import configuration');
-            }
-        } catch (error) {
-            console.error('Failed to import config:', error);
-            this.showNotification('Failed to import configuration', 'error');
-        }
-    }
 
     // Reset to defaults
     async resetToDefaults() {
@@ -818,17 +732,7 @@ function toggleGatewayMode(enabled) {
     settingsManager.toggleGatewayMode(enabled);
 }
 
-function exportConfig() {
-    settingsManager.exportConfig();
-}
 
-function importConfig() {
-    settingsManager.importConfig();
-}
-
-function processImportConfig() {
-    settingsManager.processImportConfig();
-}
 
 function resetToDefaults() {
     settingsManager.resetToDefaults();

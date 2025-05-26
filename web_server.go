@@ -269,8 +269,9 @@ func (ws *WebServer) Start() error {
 	http.HandleFunc("/api/interfaces", ws.handleAPIInterfaces)
 	http.HandleFunc("/api/lb/add", ws.handleAPIAddLB)
 	http.HandleFunc("/api/lb/remove", ws.handleAPIRemoveLB)
-	http.HandleFunc("/api/export", ws.handleAPIExport)
-	http.HandleFunc("/api/import", ws.handleAPIImport)
+	// Removed - not needed with SQLite storage
+	// http.HandleFunc("/api/export", ws.handleAPIExport)
+	// http.HandleFunc("/api/import", ws.handleAPIImport)
 	http.HandleFunc("/api/reset", ws.handleAPIReset)
 	http.HandleFunc("/api/restart", ws.handleAPIRestart)
 	http.HandleFunc("/settings", ws.handleSettings)
@@ -1025,74 +1026,25 @@ func startWebServer(port int) {
 }
 
 /*
-Update command line arguments with current settings
+Database-first restart - all configuration comes from database
 */
-func updateArgsWithCurrentSettings(args []string) []string {
-	newArgs := []string{}
-	
-	// Build new arguments based on current settings
-	newArgs = append(newArgs, "-lhost", currentSettings.ListenHost)
-	newArgs = append(newArgs, "-lport", strconv.Itoa(currentSettings.ListenPort))
-	
-	if currentSettings.WebPort > 0 {
-		newArgs = append(newArgs, "-webgui", strconv.Itoa(currentSettings.WebPort))
+func restartWithDatabaseConfig() error {
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot get executable path: %v", err)
 	}
 	
-	if currentSettings.ConfigFile != "" {
-		newArgs = append(newArgs, "-config", currentSettings.ConfigFile)
+	// No command line arguments needed - everything comes from database
+	args := []string{executable}
+	
+	log.Printf("[INFO] Restarting with database configuration: %s", executable)
+	
+	// Execute the new process without any flags
+	if err := syscall.Exec(executable, args, os.Environ()); err != nil {
+		return fmt.Errorf("failed to restart: %v", err)
 	}
 	
-	if currentSettings.TunnelMode {
-		newArgs = append(newArgs, "-tunnel")
-	}
-	
-	if currentSettings.DebugMode {
-		newArgs = append(newArgs, "-debug")
-	}
-	
-	if currentSettings.QuietMode {
-		newArgs = append(newArgs, "-quiet")
-	}
-	
-	if currentSettings.GatewayMode {
-		newArgs = append(newArgs, "-gateway")
-		newArgs = append(newArgs, "-gateway-ip", currentSettings.GatewayIP)
-		newArgs = append(newArgs, "-subnet-cidr", currentSettings.SubnetCIDR)
-		
-		if currentSettings.TransparentPort > 0 {
-			newArgs = append(newArgs, "-transparent-port", strconv.Itoa(currentSettings.TransparentPort))
-		}
-		
-		if currentSettings.DNSPort > 0 {
-			newArgs = append(newArgs, "-dns-port", strconv.Itoa(currentSettings.DNSPort))
-		}
-		
-		if currentSettings.NATInterface != "" {
-			newArgs = append(newArgs, "-nat-interface", currentSettings.NATInterface)
-		}
-		
-		if !currentSettings.AutoConfig {
-			newArgs = append(newArgs, "-no-auto-config")
-		}
-		
-		if currentSettings.DHCPStart != "" {
-			newArgs = append(newArgs, "-dhcp-start", currentSettings.DHCPStart)
-		}
-		
-		if currentSettings.DHCPEnd != "" {
-			newArgs = append(newArgs, "-dhcp-end", currentSettings.DHCPEnd)
-		}
-	}
-	
-	// Add any load balancer arguments from original args
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-lb" && i+1 < len(args) {
-			newArgs = append(newArgs, "-lb", args[i+1])
-			i++ // Skip the next argument as it's the value
-		}
-	}
-	
-	return newArgs
+	return nil
 }
 
 /*
@@ -1375,7 +1327,6 @@ func (ws *WebServer) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			"listen_host":      currentSettings.ListenHost,
 			"listen_port":      currentSettings.ListenPort,
 			"web_port":         currentSettings.WebPort,
-			"config_file":      currentSettings.ConfigFile,
 			"tunnel_mode":      currentSettings.TunnelMode,
 			"debug_mode":       currentSettings.DebugMode,
 			"quiet_mode":       currentSettings.QuietMode,
@@ -1485,18 +1436,14 @@ func (ws *WebServer) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			requires_restart = append(requires_restart, "tunnel_mode")
 			updated = append(updated, "tunnel_mode")
 		}
-		if configFile, ok := newSettings["config_file"].(string); ok && configFile != "" {
-			currentSettings.ConfigFile = configFile
-			requires_restart = append(requires_restart, "config_file")
-			updated = append(updated, "config_file")
-		}
+
 
 		// Save all settings to database
 		dbSettings := DBSettings{
 			ListenHost:  currentSettings.ListenHost,
 			ListenPort:  currentSettings.ListenPort,
 			WebPort:     currentSettings.WebPort,
-			ConfigFile:  currentSettings.ConfigFile,
+			ConfigFile:  "deprecated", // Keep for DB compatibility
 			TunnelMode:  currentSettings.TunnelMode,
 			DebugMode:   currentSettings.DebugMode,
 			QuietMode:   currentSettings.QuietMode,
@@ -1919,23 +1866,8 @@ func (ws *WebServer) handleAPIRestart(w http.ResponseWriter, r *http.Request) {
 			webServer.Stop()
 		}
 		
-		// Restart with current executable and preserved args
-		executable, err := os.Executable()
-		if err != nil {
-			log.Printf("[ERROR] Cannot get executable path: %v", err)
-			os.Exit(1)
-		}
-		
-		// Get current process arguments (excluding the executable name)
-		args := os.Args[1:]
-		
-		// Update arguments with new settings
-		args = updateArgsWithCurrentSettings(args)
-		
-		log.Printf("[INFO] Restarting with: %s %v", executable, args)
-		
-		// Execute the new process
-		if err := syscall.Exec(executable, append([]string{executable}, args...), os.Environ()); err != nil {
+		// Restart with database configuration (no flags needed)
+		if err := restartWithDatabaseConfig(); err != nil {
 			log.Printf("[ERROR] Failed to restart: %v", err)
 			os.Exit(1)
 		}

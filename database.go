@@ -259,6 +259,28 @@ func initializeDefaultData() error {
 }
 
 /*
+Initialize webPort from command line flag on first startup
+*/
+func initializeWebPortFromFlag(webPort int) error {
+	// Check if this is the first startup by checking if web_port is still default
+	settings, err := loadSettings()
+	if err != nil {
+		return err
+	}
+
+	// If webPort from flag is different from database default, update it
+	if webPort != defaultSettings.WebPort && settings.WebPort == defaultSettings.WebPort {
+		settings.WebPort = webPort
+		if err := saveSettings(settings); err != nil {
+			return fmt.Errorf("failed to save webPort from flag: %v", err)
+		}
+		log.Printf("[INFO] Saved initial webPort %d from command line to database", webPort)
+	}
+
+	return nil
+}
+
+/*
 Load settings from database
 */
 func loadSettings() (DBSettings, error) {
