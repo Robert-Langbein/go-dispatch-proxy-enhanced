@@ -103,6 +103,7 @@ var config_file string = "source_ip_rules.json"
 
 // Global debug flag
 var debug_mode bool = false
+var quiet_mode bool = false
 
 // Real-time connection tracking
 var active_connections map[string]*active_connection
@@ -852,123 +853,113 @@ func parse_load_balancers(args []string, tunnel bool) {
 Main function
 */
 func main() {
-	var lhost = flag.String("lhost", "127.0.0.1", "The host to listen for SOCKS connection")
-	var lport = flag.Int("lport", 8080, "The local port to listen for SOCKS connection")
-	var detect = flag.Bool("list", false, "Shows the available addresses for dispatching (non-tunnelling mode only)")
-	var tunnel = flag.Bool("tunnel", false, "Use tunnelling mode (acts as a transparent load balancing proxy)")
-	var quiet = flag.Bool("quiet", false, "disable logs")
-	var stats = flag.Bool("stats", false, "Show load balancer statistics and exit")
-	var configFile = flag.String("config", "source_ip_rules.json", "Configuration file for source IP rules")
-	var webPort = flag.Int("web", 0, "Enable web GUI on specified port (0 = disabled, 80 = recommended)")
-	var debug = flag.Bool("debug", false, "Enable detailed debug logging")
-	
-	// Gateway mode flags
-	var gatewayMode = flag.Bool("gateway", false, "Enable gateway mode (acts as default gateway with load balancing)")
-	var gatewayIP = flag.String("gateway-ip", "192.168.100.1", "Gateway IP address for gateway mode")
-	var subnetCIDR = flag.String("subnet", "192.168.100.0/24", "Subnet CIDR for gateway mode")
-	var transparentPort = flag.Int("transparent-port", 8888, "Transparent proxy port for gateway mode")
-	var dnsPort = flag.Int("dns-port", 5353, "DNS server port for gateway mode")
-	var natInterface = flag.String("nat-interface", "", "Network interface for NAT (auto-detect if empty)")
-	var autoConfig = flag.Bool("auto-config", true, "Automatically configure iptables rules for gateway mode")
-	var dhcpStart = flag.String("dhcp-start", "192.168.100.10", "DHCP range start for gateway mode")
-	var dhcpEnd = flag.String("dhcp-end", "192.168.100.100", "DHCP range end for gateway mode")
-
+	// Only keep the web GUI port flag - all other settings are managed via database
+	var webPort = flag.Int("webgui", 8090, "Web GUI port (use 0 to disable)")
 	flag.Parse()
-	
-	// Set custom config file path
-	config_file = *configFile
-	
-	// Initialize gateway configuration
+
+	log.Printf("[INFO] Go Dispatch Proxy Enhanced v3.0 - Database Edition")
+	log.Printf("[INFO] Starting with default settings - configuration via WebUI")
+
+	// Initialize database first
+	if err := initDatabase(); err != nil {
+		log.Fatalf("[FATAL] Database initialization failed: %v", err)
+	}
+	defer closeDatabase()
+
+	// Load all configuration from database
+	if err := syncSettingsFromDatabase(); err != nil {
+		log.Fatalf("[FATAL] Failed to load settings from database: %v", err)
+	}
+
+	if err := syncGatewayConfigFromDatabase(); err != nil {
+		log.Fatalf("[FATAL] Failed to load gateway config from database: %v", err)
+	}
+
+	// Override webPort from command line if provided
+	if *webPort != 8090 { // Only override if different from default
+		currentSettings.WebPort = *webPort
+	}
+
+	// Apply loaded settings to global variables
+	debug_mode = currentSettings.DebugMode
+	quiet_mode = currentSettings.QuietMode
+	config_file = currentSettings.ConfigFile
+
+	// Initialize gateway configuration from database
 	gateway_cfg = gateway_config{
-		enabled:           *gatewayMode,
-		transparent_port:  *transparentPort,
-		dns_port:         *dnsPort,
-		gateway_ip:       *gatewayIP,
-		subnet_cidr:      *subnetCIDR,
-		nat_interface:    *natInterface,
-		auto_configure:   *autoConfig,
-		dhcp_range_start: *dhcpStart,
-		dhcp_range_end:   *dhcpEnd,
+		enabled:           currentSettings.GatewayMode,
+		transparent_port:  currentSettings.TransparentPort,
+		dns_port:         currentSettings.DNSPort,
+		gateway_ip:       currentSettings.GatewayIP,
+		subnet_cidr:      currentSettings.SubnetCIDR,
+		nat_interface:    currentSettings.NATInterface,
+		auto_configure:   currentSettings.AutoConfig,
+		dhcp_range_start: currentSettings.DHCPStart,
+		dhcp_range_end:   currentSettings.DHCPEnd,
 		backup_rules_file: "iptables_backup.rules",
 		iptables_rules:   make([]string, 0),
 	}
+
+	mutex = &sync.Mutex{}
 	
-	if *detect {
-		detect_interfaces()
-		return
-	}
-	
-	if *stats {
-		//Parse remaining string to get addresses of load balancers for stats
-		parse_load_balancers(flag.Args(), *tunnel)
-		load_source_ip_rules()
-		get_load_balancer_stats()
-		return
+	// Load load balancers from database
+	if err := loadLoadBalancersFromDatabase(); err != nil {
+		log.Printf("[WARN] Failed to load load balancers from database: %v", err)
 	}
 
-	// Enable debug logging if requested
-	if *debug {
-		debug_mode = true
-		log.Printf("[DEBUG] Debug mode enabled")
+	// Disable timestamp in log messages if quiet mode
+	if quiet_mode {
+		log.SetOutput(io.Discard)
+	} else {
+		log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
 	}
 
-	// Disable timestamp in log messages
-	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
-
-	// Check for valid IP
-	if net.ParseIP(*lhost).To4() == nil {
-		log.Fatal("[FATAL] Invalid host ", *lhost)
+	// Enable debug logging if configured
+	if debug_mode {
+		log.Printf("[DEBUG] Debug mode enabled from database settings")
 	}
 
-	// Check for valid port
-	if *lport < 1 || *lport > 65535 {
-		log.Fatal("[FATAL] Invalid port ", *lport)
-	}
-
-	//Parse remaining string to get addresses of load balancers
-	parse_load_balancers(flag.Args(), *tunnel)
-
-	// Load source IP rules configuration
-	load_source_ip_rules()
-	
 	// Initialize gateway mode if enabled
 	if gateway_cfg.enabled {
 		if err := initialize_gateway_mode(); err != nil {
-			log.Fatalf("[FATAL] Failed to initialize gateway mode: %v", err)
+			log.Printf("[ERROR] Failed to initialize gateway mode: %v", err)
+			// Don't exit, just log the error
 		}
 	}
 
-	// Initialize web server settings
-	InitializeSettings(*lhost, *lport, *webPort, *configFile, *tunnel, *debug, *quiet, *gatewayMode, *gatewayIP, *subnetCIDR, *transparentPort, *dnsPort, *natInterface, *autoConfig, *dhcpStart, *dhcpEnd)
+	// Initialize web server settings (no longer needs all the parameters)
+	InitializeSettingsFromDatabase()
 	
-	// Start web server if enabled
-	if *webPort > 0 {
-		log.Printf("[INFO] Starting web server on port %d", *webPort)
-		startWebServer(*webPort)
+	// Start web server (always enabled by default now)
+	if currentSettings.WebPort > 0 {
+		log.Printf("[INFO] Starting web server on port %d", currentSettings.WebPort)
+		startWebServer(currentSettings.WebPort)
 	}
 
-	local_bind_address := fmt.Sprintf("%s:%d", *lhost, *lport)
+	local_bind_address := fmt.Sprintf("%s:%d", currentSettings.ListenHost, currentSettings.ListenPort)
 
 	// Start local server
 	l, err := net.Listen("tcp4", local_bind_address)
 	if err != nil {
-		log.Fatalln("[FATAL] Could not start local server on ", local_bind_address)
+		log.Fatalf("[FATAL] Could not start local server on %s: %v", local_bind_address, err)
 	}
-	log.Println("[INFO] Enhanced SOCKS5 proxy with source IP load balancing started on ", local_bind_address)
-	log.Printf("[INFO] Load balancing %d interfaces with enhanced features", len(lb_list))
 	
-	// Print enhanced load balancer information
+	log.Printf("[INFO] Enhanced SOCKS5 proxy started on %s", local_bind_address)
+	log.Printf("[INFO] Web GUI available at http://localhost:%d", currentSettings.WebPort)
+	log.Printf("[INFO] Load balancing %d interfaces", len(lb_list))
+	
+	// Print load balancer information
 	for i, lb := range lb_list {
 		custom_rules := len(lb.source_ip_rules)
 		status := "enabled"
 		if !lb.enabled {
 			status = "disabled"
 		}
-		log.Printf("[INFO] LB %d: %s (%s) - Default ratio: %d, Custom rules: %d, Status: %s", 
+		log.Printf("[INFO] LB %d: %s (%s) - Ratio: %d, Rules: %d, Status: %s", 
 			i+1, lb.address, lb.iface, lb.contention_ratio, custom_rules, status)
 	}
 	
-	if *debug {
+	if debug_mode {
 		log.Printf("[DEBUG] Available network interfaces:")
 		detect_interfaces()
 	}
@@ -976,20 +967,21 @@ func main() {
 	defer l.Close()
 	defer stopWebServer()
 	defer cleanup_gateway_mode()
-
-	if (*quiet) {
-		log.SetOutput(io.Discard)
-	}
-
-	mutex = &sync.Mutex{}
 	
-	// Start cleanup goroutine for old connections
+	// Start periodic database sync and cleanup
 	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
+		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
+				// Save statistics snapshot
+				if err := saveStatisticsSnapshot(); err != nil {
+					log.Printf("[WARN] Failed to save statistics: %v", err)
+				}
+				// Sync load balancers to database
+				syncLoadBalancersToDatabase()
+				// Cleanup old connections
 				cleanup_old_connections()
 			}
 		}
@@ -1019,7 +1011,7 @@ func main() {
 		if err != nil {
 			log.Println("[WARN] Could not accept connection")
 		} else {
-			go handle_connection(conn, *tunnel)
+			go handle_connection(conn, currentSettings.TunnelMode)
 		}
 	}
 }

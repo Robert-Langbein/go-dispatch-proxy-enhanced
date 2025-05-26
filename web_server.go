@@ -1464,7 +1464,7 @@ func (ws *WebServer) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			updated = append(updated, "dhcp_end")
 		}
 
-		// Settings that require restart - but still save them
+		// Settings that require restart - but still save them to database
 		if listenHost, ok := newSettings["listen_host"].(string); ok && listenHost != "" {
 			currentSettings.ListenHost = listenHost
 			requires_restart = append(requires_restart, "listen_host")
@@ -1489,6 +1489,36 @@ func (ws *WebServer) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			currentSettings.ConfigFile = configFile
 			requires_restart = append(requires_restart, "config_file")
 			updated = append(updated, "config_file")
+		}
+
+		// Save all settings to database
+		dbSettings := DBSettings{
+			ListenHost:  currentSettings.ListenHost,
+			ListenPort:  currentSettings.ListenPort,
+			WebPort:     currentSettings.WebPort,
+			ConfigFile:  currentSettings.ConfigFile,
+			TunnelMode:  currentSettings.TunnelMode,
+			DebugMode:   currentSettings.DebugMode,
+			QuietMode:   currentSettings.QuietMode,
+		}
+		if err := saveSettings(dbSettings); err != nil {
+			log.Printf("[ERROR] Failed to save settings to database: %v", err)
+		}
+
+		// Save gateway config to database
+		dbGatewayConfig := DBGatewayConfig{
+			Enabled:         currentSettings.GatewayMode,
+			GatewayIP:       currentSettings.GatewayIP,
+			SubnetCIDR:      currentSettings.SubnetCIDR,
+			TransparentPort: currentSettings.TransparentPort,
+			DNSPort:         currentSettings.DNSPort,
+			NATInterface:    currentSettings.NATInterface,
+			AutoConfigure:   currentSettings.AutoConfig,
+			DHCPRangeStart:  currentSettings.DHCPStart,
+			DHCPRangeEnd:    currentSettings.DHCPEnd,
+		}
+		if err := saveGatewayConfig(dbGatewayConfig); err != nil {
+			log.Printf("[ERROR] Failed to save gateway config to database: %v", err)
 		}
 
 		// Create detailed message
@@ -1618,6 +1648,24 @@ func (ws *WebServer) handleAPIAddLB(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Save to database first
+	dbLB := DBLoadBalancer{
+		Address:         request.Address,
+		Interface:       request.Interface,
+		ContentionRatio: request.ContentionRatio,
+		Enabled:         true,
+	}
+	
+	if err := saveLoadBalancer(dbLB); err != nil {
+		mutex.Unlock()
+		response := map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to save load balancer to database: %v", err),
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
 	// Add new load balancer to the list
 	newLB := enhanced_load_balancer{
 		address:             request.Address,
@@ -1678,6 +1726,16 @@ func (ws *WebServer) handleAPIRemoveLB(w http.ResponseWriter, r *http.Request) {
 
 	for i, lb := range lb_list {
 		if lb.address == request.Address {
+			// Remove from database first
+			if err := deleteLoadBalancer(request.Address); err != nil {
+				response := map[string]interface{}{
+					"success": false,
+					"error":   fmt.Sprintf("Failed to delete from database: %v", err),
+				}
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+			
 			// Remove from slice
 			lb_list = append(lb_list[:i], lb_list[i+1:]...)
 			
