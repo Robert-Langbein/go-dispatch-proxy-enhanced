@@ -55,74 +55,44 @@
                     </h1>
                     <p class="topology-subtitle">Real-time visualization of network traffic and load balancing</p>
                 </div>
-                
-                <!-- Topology Controls -->
-                <div class="topology-controls">
-                    <div class="control-group">
-                        <label>View Mode</label>
-                        <select id="viewMode" onchange="changeViewMode(this.value)">
-                            <option value="traffic">Traffic Flow</option>
-                            <option value="connections">Active Connections</option>
-                            <option value="performance">Performance</option>
-                        </select>
-                    </div>
-                    
-                    <div class="control-group">
-                        <label>Animation Speed</label>
-                        <input type="range" id="animationSpeed" min="0.5" max="3" step="0.5" value="1" 
-                               onchange="setAnimationSpeed(this.value)">
-                        <span id="speedValue">1x</span>
-                    </div>
-                    
-                    <div class="control-group">
-                        <button class="btn btn-secondary" onclick="centerTopology()" title="Center View">
-                            <i class="fas fa-crosshairs"></i>
-                            Center View
-                        </button>
-                    </div>
-                </div>
             </section>
 
-            <!-- Network Statistics -->
-            <section class="network-stats">
-                <div class="stat-card">
-                    <div class="stat-icon">
-                        <i class="fas fa-exchange-alt"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3 id="totalThroughput">0 B/s</h3>
-                        <p>Total Throughput</p>
-                    </div>
+            <!-- Real-time Traffic Grid - Dashboard Style -->
+            <section class="traffic-grid">
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Download Speed</h4>
+                    <div class="traffic-card-value" id="downloadSpeed">0 B/s</div>
+                    <p class="traffic-card-unit speed-bits" id="downloadSpeedBits">0 bit/s</p>
                 </div>
                 
-                <div class="stat-card">
-                    <div class="stat-icon">
-                        <i class="fas fa-link"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3 id="activeConnections">0</h3>
-                        <p>Active Connections</p>
-                    </div>
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Upload Speed</h4>
+                    <div class="traffic-card-value" id="uploadSpeed">0 B/s</div>
+                    <p class="traffic-card-unit speed-bits" id="uploadSpeedBits">0 bit/s</p>
                 </div>
                 
-                <div class="stat-card">
-                    <div class="stat-icon">
-                        <i class="fas fa-balance-scale"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3 id="loadBalancers">0</h3>
-                        <p>Load Balancers</p>
-                    </div>
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Active Connections</h4>
+                    <div class="traffic-card-value" id="activeConnections">0</div>
+                    <p class="traffic-card-unit">Current sessions</p>
                 </div>
                 
-                <div class="stat-card">
-                    <div class="stat-icon">
-                        <i class="fas fa-users"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3 id="uniqueClients">0</h3>
-                        <p>Unique Clients</p>
-                    </div>
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Load Balancers</h4>
+                    <div class="traffic-card-value" id="loadBalancers">0</div>
+                    <p class="traffic-card-unit">Active interfaces</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Unique Clients</h4>
+                    <div class="traffic-card-value" id="uniqueClients">0</div>
+                    <p class="traffic-card-unit">Connected devices</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Total Throughput</h4>
+                    <div class="traffic-card-value" id="totalThroughput">0 B/s</div>
+                    <p class="traffic-card-unit">Combined traffic</p>
                 </div>
             </section>
 
@@ -135,35 +105,6 @@
                             <i class="fas fa-spinner fa-spin"></i>
                         </div>
                         <p>Loading network topology...</p>
-                    </div>
-                </div>
-                
-                <!-- Legend -->
-                <div class="topology-legend">
-                    <h4>Legend</h4>
-                    <div class="legend-item">
-                        <div class="legend-icon proxy-icon"></div>
-                        <span>Dispatch Proxy</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-icon lb-icon"></div>
-                        <span>Load Balancer</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-icon client-icon"></div>
-                        <span>Client</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-line high-traffic"></div>
-                        <span>High Traffic</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-line medium-traffic"></div>
-                        <span>Medium Traffic</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-line low-traffic"></div>
-                        <span>Low Traffic</span>
                     </div>
                 </div>
             </section>

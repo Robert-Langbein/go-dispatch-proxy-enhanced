@@ -16,14 +16,14 @@ class NetworkTopology {
         
         // UniFi UDM Colors (exact match)
         this.colors = {
-            connectionLine: '#1976d2',  // UDM blue for connections
-            particle: '#1976d2',        // Same blue for particles
+            connectionLine: '#44c6fd',  // UDM blue for connections
+            particle: '#44c6fd',        // Same blue for particles
             background: '#ffffff',
             text: '#212327',
             textSecondary: '#50565e',
             deviceBorder: '#ffffff',
-            downloadSpeed: '#1976d2',   // Blue for download (↓)
-            uploadSpeed: '#ff9800'      // Orange for upload (↑)
+            downloadSpeed: '#38cc65',   // Green for download (↓) - consistent with user request
+            uploadSpeed: '#006fff'      // Blue for upload (↑) - consistent with user request
         };
         
         // Device image URLs - real device photos without frames
@@ -711,12 +711,29 @@ class NetworkTopology {
 
     updateStatistics(config, stats) {
         const trafficStats = stats.traffic_stats || {};
+        
+        // Download Speed (Bytes In)
+        const downloadSpeed = this.formatSpeed(trafficStats.bytes_in_per_second || 0);
+        const downloadSpeedBits = this.formatSpeedBits(trafficStats.bytes_in_per_second || 0);
+        
+        // Upload Speed (Bytes Out)  
+        const uploadSpeed = this.formatSpeed(trafficStats.bytes_out_per_second || 0);
+        const uploadSpeedBits = this.formatSpeedBits(trafficStats.bytes_out_per_second || 0);
+        
+        // Total Throughput
         const totalThroughput = this.formatSpeed((trafficStats.bytes_in_per_second || 0) + (trafficStats.bytes_out_per_second || 0));
+        
+        // Other stats
         const activeConnections = trafficStats.active_connections || 0;
         const loadBalancers = config.load_balancers?.length || 0;
         const uniqueClients = this.devices.filter(d => d.type !== 'isp' && d.type !== 'gateway' && d.type !== 'load-balancer').length;
 
+        // Update Dashboard-style traffic cards
         const elements = {
+            'downloadSpeed': downloadSpeed,
+            'downloadSpeedBits': downloadSpeedBits,
+            'uploadSpeed': uploadSpeed,
+            'uploadSpeedBits': uploadSpeedBits,
             'totalThroughput': totalThroughput,
             'activeConnections': activeConnections,
             'loadBalancers': loadBalancers,
@@ -731,21 +748,29 @@ class NetworkTopology {
         });
     }
 
-    setupControls() {
-        const speedControl = document.getElementById('animationSpeed');
-        if (speedControl) {
-            speedControl.addEventListener('input', (e) => {
-                this.setAnimationSpeed(parseFloat(e.target.value));
-            });
+    formatSpeedBits(bytesPerSecond) {
+        const bitsPerSecond = bytesPerSecond * 8;
+        if (bitsPerSecond === 0) return '0 bit/s';
+        
+        const units = ['bit/s', 'kbit/s', 'Mbit/s', 'Gbit/s', 'Tbit/s'];
+        const base = 1000; // Use 1000 for bits per second
+        
+        for (let i = units.length - 1; i >= 0; i--) {
+            const unit = Math.pow(base, i);
+            if (bitsPerSecond >= unit) {
+                return (bitsPerSecond / unit).toFixed(1) + ' ' + units[i];
+            }
         }
+        return bitsPerSecond.toFixed(1) + ' bit/s';
+    }
+
+    setupControls() {
+        // Simplified - no animation speed controls
     }
 
     setAnimationSpeed(speed) {
         this.animationSpeed = speed;
-        const speedValue = document.getElementById('speedValue');
-        if (speedValue) {
-            speedValue.textContent = speed + 'x';
-        }
+        // No speed display needed anymore
     }
 
     handleResize() {
@@ -819,23 +844,7 @@ function toggleAutoRefresh() {
     }
 }
 
-function setAnimationSpeed(speed) {
-    if (networkTopology) {
-        networkTopology.setAnimationSpeed(speed);
-    }
-}
-
-function changeViewMode(mode) {
-    if (networkTopology) {
-        networkTopology.loadTopologyData();
-    }
-}
-
-function centerTopology() {
-    if (networkTopology) {
-        networkTopology.loadTopologyData();
-    }
-}
+// Simplified global functions - removed unused controls
 
 function closeDevicePanel() {
     const panel = document.getElementById('deviceDetailsPanel');

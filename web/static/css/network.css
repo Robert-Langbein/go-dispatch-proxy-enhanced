@@ -13,6 +13,10 @@
     --topology-text: #212327;
     --topology-text-secondary: #50565e;
     --topology-border: rgba(33, 35, 39, 0.12);
+    
+    /* Node Traffic Colors */
+    --node-upload-color: #006fff;    /* Blue for Upload */
+    --node-download-color: #38cc65;  /* Green for Download */
 }
 
 /* Topology Header */
@@ -20,11 +24,7 @@
     background: var(--unifi-bg-primary);
     border-bottom: 1px solid var(--unifi-border-primary);
     padding: var(--unifi-space-6);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--unifi-space-4);
+    text-align: center;
 }
 
 .topology-title h1 {
@@ -43,105 +43,79 @@
     font-size: 14px;
 }
 
-/* Topology Controls */
-.topology-controls {
-    display: flex;
-    gap: var(--unifi-space-4);
-    align-items: center;
-}
+/* Simplified Topology Header */
 
-.control-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.control-group label {
-    font-size: 12px;
-    color: var(--unifi-text-secondary);
-    font-weight: 500;
-}
-
-.control-group select {
-    background: var(--unifi-bg-primary);
-    border: 1px solid var(--unifi-border-primary);
-    color: var(--unifi-text-primary);
-    padding: 6px 12px;
-    border-radius: var(--unifi-radius-sm);
-    font-size: 14px;
-    min-width: 140px;
-}
-
-.control-group input[type="range"] {
-    width: 100px;
-    accent-color: var(--unifi-blue-primary);
-}
-
-#speedValue {
-    font-size: 12px;
-    color: var(--unifi-text-secondary);
-    text-align: center;
-    min-width: 30px;
-}
-
-/* Network Statistics */
-.network-stats {
+/* Real-time Traffic Grid - Dashboard Style */
+.traffic-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: var(--unifi-space-4);
     padding: var(--unifi-space-6);
     background: var(--unifi-bg-secondary);
     border-bottom: 1px solid var(--unifi-border-primary);
 }
 
-.stat-card {
-    background: var(--unifi-bg-primary);
+.traffic-card {
+    background-color: var(--unifi-bg-primary);
     border: 1px solid var(--unifi-border-primary);
     border-radius: var(--unifi-radius-md);
     padding: var(--unifi-space-4);
     display: flex;
-    align-items: center;
-    gap: var(--unifi-space-3);
-    transition: all 0.2s ease;
+    flex-direction: column;
+    gap: var(--unifi-space-2);
     box-shadow: var(--unifi-shadow-sm);
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
 }
 
-.stat-card:hover {
+.traffic-card:hover {
     box-shadow: var(--unifi-shadow-md);
     border-color: var(--unifi-border-secondary);
-    transform: translateY(-1px);
 }
 
-.stat-icon {
-    width: 48px;
-    height: 48px;
-    background: linear-gradient(135deg, var(--unifi-blue-primary), var(--unifi-blue-hover));
-    border-radius: var(--unifi-radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 20px;
-    box-shadow: 0 2px 8px rgba(0, 111, 255, 0.25);
-}
-
-.stat-content h3 {
-    font-size: 24px;
+.traffic-card-title {
+    font-size: var(--unifi-font-size-sm);
     font-weight: 600;
-    margin: 0;
-    color: var(--unifi-text-primary);
+    color: var(--unifi-text-secondary);
+    margin: 0 0 var(--unifi-space-1) 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
-.stat-content p {
-    font-size: 14px;
-    color: var(--unifi-text-secondary);
-    margin: 4px 0 0 0;
+.traffic-card-value {
+    font-size: var(--unifi-font-size-2xl);
+    font-weight: 700;
+    color: var(--unifi-text-primary);
+    margin: 0;
+    line-height: 1.2;
+}
+
+.traffic-card-unit {
+    font-size: var(--unifi-font-size-xs);
+    color: var(--unifi-text-tertiary);
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Download/Upload Speed Cards - Dashboard Style Colors */
+.traffic-card:nth-child(1) .traffic-card-value {
+    color: var(--unifi-traffic-down);
+}
+
+.traffic-card:nth-child(2) .traffic-card-value {
+    color: var(--unifi-traffic-up);
+}
+
+.speed-bits {
+    color: var(--unifi-text-disabled);
+    font-size: var(--unifi-font-size-xs);
 }
 
 /* Topology Container */
 .topology-container {
-    display: flex;
-    height: calc(100vh - 400px);
+    height: calc(100vh - 350px);
     min-height: 600px;
     background: var(--topology-bg);
     position: relative;
@@ -149,7 +123,8 @@
 }
 
 .topology-canvas {
-    flex: 1;
+    width: 100%;
+    height: 100%;
     position: relative;
     overflow: hidden;
     background: var(--topology-bg-light);
@@ -278,72 +253,7 @@
     animation: particlePulse 1.5s ease-in-out infinite;
 }
 
-/* Legend */
-.topology-legend {
-    background: var(--unifi-bg-primary);
-    border-left: 1px solid var(--unifi-border-primary);
-    padding: var(--unifi-space-4);
-    width: 240px;
-    overflow-y: auto;
-    box-shadow: var(--unifi-shadow-sm);
-    backdrop-filter: blur(10px);
-}
-
-.topology-legend h4 {
-    color: var(--unifi-text-primary);
-    font-size: 16px;
-    font-weight: 600;
-    margin: 0 0 20px 0;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--unifi-border-primary);
-}
-
-.legend-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-    font-size: 14px;
-    color: var(--unifi-text-secondary);
-    padding: 10px 8px;
-    border-radius: var(--unifi-radius-sm);
-    transition: all 0.2s ease;
-}
-
-.legend-item:hover {
-    background: var(--unifi-bg-hover);
-    color: var(--unifi-text-primary);
-}
-
-.legend-icon {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    border: 2px solid white;
-}
-
-.legend-icon.proxy-icon {
-    background: var(--unifi-gateway);
-}
-
-.legend-icon.lb-icon {
-    background: var(--unifi-lb);
-}
-
-.legend-icon.client-icon {
-    background: var(--unifi-client);
-}
-
-.legend-line {
-    width: 30px;
-    height: 3px;
-    flex-shrink: 0;
-    border-radius: 2px;
-    background: var(--unifi-connection-line);
-    opacity: 0.7;
-}
+/* Removed Legend - Cleaner Layout */
 
 /* Device Details Panel */
 .device-details-panel {
@@ -490,29 +400,26 @@
 /* Responsive Design */
 @media (max-width: 768px) {
     .topology-header {
-        flex-direction: column;
-        align-items: stretch;
+        padding: var(--unifi-space-4);
     }
     
-    .topology-controls {
-        flex-wrap: wrap;
-        justify-content: space-between;
-    }
-    
-    .network-stats {
+    .traffic-grid {
         grid-template-columns: repeat(2, 1fr);
+        gap: var(--unifi-space-3);
+        padding: var(--unifi-space-4);
+    }
+    
+    .traffic-card {
+        padding: var(--unifi-space-3);
+    }
+    
+    .traffic-card-value {
+        font-size: var(--unifi-font-size-xl);
     }
     
     .topology-container {
-        flex-direction: column;
-        height: auto;
+        height: calc(100vh - 300px);
         min-height: 500px;
-    }
-    
-    .topology-legend {
-        width: 100%;
-        border-left: none;
-        border-top: 1px solid var(--unifi-border-primary);
     }
     
     .device-details-panel {
@@ -531,22 +438,7 @@
     }
 }
 
-/* Interactive states */
-.control-group select:hover {
-    border-color: var(--unifi-border-secondary);
-}
-
-.control-group select:focus {
-    outline: none;
-    border-color: var(--unifi-blue-primary);
-    box-shadow: 0 0 0 2px rgba(0, 111, 255, 0.1);
-}
-
-/* Enhance legend visibility */
-.legend-item:hover .legend-icon {
-    transform: scale(1.1);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
+/* Interactive states - Cleaned up */
 
 /* UniFi-style smooth animations */
 * {
