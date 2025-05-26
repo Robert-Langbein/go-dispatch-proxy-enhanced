@@ -75,7 +75,7 @@
                     </div>
                     
                     <div class="control-group">
-                        <button class="btn btn-secondary" onclick="centerTopology()">
+                        <button class="btn btn-secondary" onclick="centerTopology()" title="Center View">
                             <i class="fas fa-crosshairs"></i>
                             Center View
                         </button>
@@ -90,7 +90,7 @@
                         <i class="fas fa-exchange-alt"></i>
                     </div>
                     <div class="stat-content">
-                        <h3 id="totalThroughput">0 Mbps</h3>
+                        <h3 id="totalThroughput">0 B/s</h3>
                         <p>Total Throughput</p>
                     </div>
                 </div>
@@ -131,7 +131,9 @@
                 <div class="topology-canvas" id="networkTopology">
                     <!-- D3.js visualization will be rendered here -->
                     <div class="topology-loading">
-                        <i class="fas fa-spinner fa-spin"></i>
+                        <div class="loading-spinner">
+                            <i class="fas fa-spinner fa-spin"></i>
+                        </div>
                         <p>Loading network topology...</p>
                     </div>
                 </div>

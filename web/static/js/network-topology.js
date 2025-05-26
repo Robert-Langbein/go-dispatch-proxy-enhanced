@@ -1,102 +1,111 @@
-// Network Topology Visualization - UniFi Style
+// UniFi UDM Network Topology - Custom Canvas Implementation
 class NetworkTopology {
     constructor() {
-        this.svg = null;
+        this.canvas = null;
+        this.ctx = null;
         this.width = 0;
         this.height = 0;
-        this.simulation = null;
-        this.nodes = [];
-        this.links = [];
+        this.devices = [];
+        this.connections = [];
+        this.particles = [];
+        this.images = {};
         this.autoRefresh = false;
         this.refreshInterval = null;
         this.animationSpeed = 1;
-        this.viewMode = 'traffic';
-        this.zoomBehavior = null;
-        this.transform = null;
+        this.animationFrame = null;
+        
+        // UniFi UDM Colors (exact match)
+        this.colors = {
+            connectionLine: '#1976d2',  // UDM blue for connections
+            particle: '#1976d2',        // Same blue for particles
+            background: '#ffffff',
+            text: '#212327',
+            textSecondary: '#50565e',
+            deviceBorder: '#ffffff',
+            downloadSpeed: '#1976d2',   // Blue for download (↓)
+            uploadSpeed: '#ff9800'      // Orange for upload (↑)
+        };
+        
+        // Device image URLs - real device photos without frames
+        this.deviceImages = {
+            'isp': 'https://images.ui.com/b1eb8f5f-f800-4bb1-b92c-fe1e29b97c9b/7c3b0ccc-4325-4f41-a16f-8b4c98c21d0d.png', // Internet globe
+            'gateway': 'https://images.ui.com/b1eb8f5f-f800-4bb1-b92c-fe1e29b97c9b/dd2c6e6c-58ad-4d26-a23e-48e3b2c6c7f8.png', // Gateway
+            'load-balancer': 'https://images.ui.com/b1eb8f5f-f800-4bb1-b92c-fe1e29b97c9b/4a7b3b5e-8f1c-4e2b-9a6b-1c8e5f7a9b3d.png', // Switch
+            'nas': 'https://www.synology.com/img/products/detail/DS923+/01-front.png', // Synology NAS
+            'chromecast': 'https://lh3.googleusercontent.com/lrDVt_l-xwpO_j4lG82Stf_iTLx2HQMtq9oFjGu-2kQ6N0mUJmxk6E-0Z8F-s2dQ8w=s1600', // Chromecast
+            'accesspoint': 'https://images.ui.com/b1eb8f5f-f800-4bb1-b92c-fe1e29b97c9b/f3d4c5e6-7890-1234-5678-9abcdef01234.png', // Access Point
+            'iphone': 'https://www.apple.com/newsroom/images/product/iphone/standard/Apple_iPhone-13-Pro_iPhone-13-Pro-Max_09142021_inline.jpg.large.jpg', // iPhone
+            'ipad': 'https://www.apple.com/newsroom/images/product/ipad/standard/Apple_iPad-Pro-12-9-inch-and-iPad-Pro-11-inch_10182021_inline.jpg.large.jpg', // iPad
+            'printer': 'https://www.brother.com/pub/bsc/image_warehouse/EN/products/DCP-9020CDW_L.jpg', // Brother Printer
+            'macbook': 'https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/macbook-air-space-gray-select-201810?wid=904&hei=840&fmt=jpeg&qlt=80&.v=1633027804000' // MacBook Air
+        };
         
         this.init();
     }
 
-    init() {
-        this.setupSVG();
-        this.setupZoom();
+    async init() {
+        this.setupCanvas();
+        await this.loadImages();
         this.loadTopologyData();
         this.setupControls();
-        
-        // Auto-refresh every 5 seconds
+        this.startAnimation();
         this.startAutoRefresh();
         
         // Handle window resize
         window.addEventListener('resize', () => this.handleResize());
     }
 
-    setupSVG() {
+    setupCanvas() {
         const container = document.getElementById('networkTopology');
         const rect = container.getBoundingClientRect();
         
         this.width = rect.width;
         this.height = rect.height;
         
-        // Remove existing SVG
-        d3.select(container).select('svg').remove();
+        // Remove existing content
+        container.innerHTML = '';
         
-        // Create new SVG
-        this.svg = d3.select(container)
-            .append('svg')
-            .attr('width', this.width)
-            .attr('height', this.height);
-            
-        // Create groups for different layers
-        this.svg.append('defs');
-        this.linkGroup = this.svg.append('g').attr('class', 'links');
-        this.nodeGroup = this.svg.append('g').attr('class', 'nodes');
-        this.flowGroup = this.svg.append('g').attr('class', 'flows');
+        // Create canvas
+        this.canvas = document.createElement('canvas');
+        this.canvas.width = this.width;
+        this.canvas.height = this.height;
+        this.canvas.style.width = '100%';
+        this.canvas.style.height = '100%';
+        this.canvas.style.cursor = 'pointer';
         
-        // Add gradient definitions for flows
-        this.setupGradients();
+        this.ctx = this.canvas.getContext('2d');
+        container.appendChild(this.canvas);
+        
+        // Add click handler
+        this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
     }
 
-    setupGradients() {
-        const defs = this.svg.select('defs');
-        
-        // High traffic gradient
-        const highGradient = defs.append('linearGradient')
-            .attr('id', 'high-traffic-gradient')
-            .attr('gradientUnits', 'userSpaceOnUse');
-        
-        highGradient.append('stop')
-            .attr('offset', '0%')
-            .attr('stop-color', '#ff4757')
-            .attr('stop-opacity', 0);
-        
-        highGradient.append('stop')
-            .attr('offset', '50%')
-            .attr('stop-color', '#ff4757')
-            .attr('stop-opacity', 1);
-            
-        highGradient.append('stop')
-            .attr('offset', '100%')
-            .attr('stop-color', '#ff4757')
-            .attr('stop-opacity', 0);
-    }
-
-    setupZoom() {
-        this.zoomBehavior = d3.zoom()
-            .scaleExtent([0.1, 4])
-            .on('zoom', (event) => {
-                this.transform = event.transform;
-                this.nodeGroup.attr('transform', this.transform);
-                this.linkGroup.attr('transform', this.transform);
-                this.flowGroup.attr('transform', this.transform);
+    async loadImages() {
+        const loadPromises = Object.entries(this.deviceImages).map(([key, url]) => {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                    this.images[key] = img;
+                    resolve();
+                };
+                img.onerror = () => {
+                    // Fallback to colored circle if image fails
+                    console.warn(`Failed to load image for ${key}, using fallback`);
+                    this.images[key] = null;
+                    resolve();
+                };
+                img.src = url;
             });
-            
-        this.svg.call(this.zoomBehavior);
+        });
+        
+        await Promise.all(loadPromises);
     }
 
     async loadTopologyData() {
         try {
-            // Hide loading, show spinner
-            document.querySelector('.topology-loading').classList.remove('hidden');
+            // Show loading
+            this.showLoading(true);
             
             // Fetch topology data from API
             const [configResponse, statsResponse] = await Promise.all([
@@ -111,14 +120,11 @@ class NetworkTopology {
             const config = await configResponse.json();
             const stats = await statsResponse.json();
             
-            // Transform data into nodes and links
+            // Create UniFi UDM layout
             this.processTopologyData(config, stats);
             
             // Hide loading
-            document.querySelector('.topology-loading').classList.add('hidden');
-            
-            // Render topology
-            this.renderTopology();
+            this.showLoading(false);
             
         } catch (error) {
             console.error('Failed to load topology data:', error);
@@ -127,338 +133,527 @@ class NetworkTopology {
     }
 
     processTopologyData(config, stats) {
-        this.nodes = [];
-        this.links = [];
+        this.devices = [];
+        this.connections = [];
+        this.particles = [];
         
-        // Add proxy node (central hub)
-        const proxyNode = {
-            id: 'proxy',
-            type: 'proxy',
-            name: 'Dispatch Proxy',
-            ip: `${config.settings?.listen_host || '127.0.0.1'}:${config.settings?.listen_port || 8080}`,
-            connections: stats.active_connections || 0,
-            throughput: this.calculateTotalThroughput(stats),
-            status: 'active',
-            x: this.width / 2,
-            y: this.height / 2,
-            fx: this.width / 2, // Fixed position
-            fy: this.height / 2
+        console.log('=== API DATA DEBUG ===');
+        console.log('Config data:', JSON.stringify(config, null, 2));
+        console.log('Stats data:', JSON.stringify(stats, null, 2));
+        console.log('Load balancers:', config.load_balancers);
+        console.log('Active sources:', stats.active_sources);
+        console.log('Traffic stats:', stats.traffic_stats);
+        
+        // UniFi UDM Tree Structure: Clear hierarchical layers from left to right
+        const layerWidth = this.width / 4; // 4 layers max (simpler layout)
+        const centerY = this.height / 2;
+        
+        // CORRECTED TOPOLOGY: Internet → Load Balancers → Dispatch Proxy → Clients
+        
+        // Layer 0: Internet (Far Left)
+        const internetDevice = {
+            id: 'internet',
+            type: 'isp',
+            name: 'Internet',
+            subtitle: 'ISP',
+            downloadSpeed: this.formatSpeed(stats.traffic_stats?.bytes_in_per_second || 0),
+            uploadSpeed: this.formatSpeed(stats.traffic_stats?.bytes_out_per_second || 0),
+            x: layerWidth * 0.5,
+            y: centerY,
+            layer: 0,
+            size: 50
         };
-        this.nodes.push(proxyNode);
+        this.devices.push(internetDevice);
         
-        // Add load balancer nodes
+        // Layer 1: Load Balancers (Multiple Internet Connections)
+        let loadBalancerDevices = [];
         if (config.load_balancers && config.load_balancers.length > 0) {
+            const lbCount = config.load_balancers.length;
+            const lbSpacing = Math.min(100, (this.height - 200) / Math.max(lbCount - 1, 1));
+            const lbStartY = centerY - ((lbCount - 1) * lbSpacing) / 2;
+            
             config.load_balancers.forEach((lb, index) => {
-                const lbNode = {
+                // Use real load balancer data from API
+                const lbStats = stats.load_balancers?.find(lbStat => lbStat.address === lb.address) || {};
+                
+                const lbDevice = {
                     id: `lb_${lb.address}`,
                     type: 'load-balancer',
-                    name: `LB${lb.id || index + 1}`,
-                    ip: lb.address,
-                    interface: lb.interface,
-                    ratio: lb.contention_ratio,
-                    connections: lb.total_connections || 0,
-                    throughput: this.formatBytes((lb.bytes_in || 0) + (lb.bytes_out || 0)),
-                    status: lb.enabled ? 'active' : 'inactive',
-                    enabled: lb.enabled
+                    name: lb.interface || 'Load Balancer',
+                    subtitle: lb.address,
+                    downloadSpeed: this.formatSpeed(this.calculateLBTraffic(lbStats, 'in')),
+                    uploadSpeed: this.formatSpeed(this.calculateLBTraffic(lbStats, 'out')),
+                    x: layerWidth * 1.5,
+                    y: lbStartY + (index * lbSpacing),
+                    layer: 1,
+                    size: 45,
+                    enabled: lb.enabled,
+                    totalConnections: lbStats.total_connections || 0,
+                    successRate: lbStats.success_rate || 0
                 };
-                this.nodes.push(lbNode);
+                this.devices.push(lbDevice);
+                loadBalancerDevices.push(lbDevice);
                 
-                // Create link between proxy and load balancer
-                const traffic = this.calculateTrafficLevel(lb.total_connections || 0);
-                this.links.push({
-                    source: 'proxy',
-                    target: lbNode.id,
-                    type: 'proxy-to-lb',
-                    traffic: traffic,
-                    bandwidth: this.formatBytes((lb.bytes_in || 0) + (lb.bytes_out || 0)),
-                    connections: lb.total_connections || 0,
+                // Connection: Internet → Load Balancer
+                this.connections.push({
+                    from: internetDevice,
+                    to: lbDevice,
                     enabled: lb.enabled
                 });
             });
         }
         
-        // Add sample client nodes (simulated based on connections)
-        this.addSampleClients(stats);
+        // Layer 2: Dispatch Proxy Gateway (Center)
+        const gatewayDevice = {
+            id: 'gateway',
+            type: 'gateway',
+            name: 'Dispatch Proxy',
+            subtitle: 'Gateway',
+            downloadSpeed: this.formatSpeed(stats.traffic_stats?.bytes_in_per_second || 0),
+            uploadSpeed: this.formatSpeed(stats.traffic_stats?.bytes_out_per_second || 0),
+            x: layerWidth * 2.5,
+            y: centerY,
+            layer: 2,
+            size: 60
+        };
+        this.devices.push(gatewayDevice);
+        
+        // Connections: Load Balancers → Dispatch Proxy
+        loadBalancerDevices.forEach(lb => {
+            this.connections.push({
+                from: lb,
+                to: gatewayDevice,
+                enabled: lb.enabled
+            });
+        });
+        
+        // Layer 3: Client Devices (Right Side - connect to Dispatch Proxy)
+        let clientDevices = [];
+        if (stats.active_sources && stats.active_sources.length > 0) {
+            const clientSpacing = Math.min(80, (this.height - 160) / Math.max(stats.active_sources.length - 1, 1));
+            const clientStartY = centerY - ((stats.active_sources.length - 1) * clientSpacing) / 2;
+            
+            stats.active_sources.forEach((source, index) => {
+                const clientDevice = {
+                    id: `client_${source.source_ip}`,
+                    type: this.guessDeviceType(source.source_ip),
+                    name: this.getDeviceName(source.source_ip),
+                    subtitle: source.source_ip,
+                    downloadSpeed: this.formatSpeed(this.estimateClientTraffic(source, 'in')),
+                    uploadSpeed: this.formatSpeed(this.estimateClientTraffic(source, 'out')),
+                    x: layerWidth * 3.5,
+                    y: clientStartY + (index * clientSpacing),
+                    layer: 3,
+                    size: 40,
+                    totalConnections: source.total_connections || 0,
+                    activeConnections: source.active_connections || 0,
+                    assignedLB: source.assigned_lb
+                };
+                this.devices.push(clientDevice);
+                clientDevices.push(clientDevice);
+                
+                // Connection: Dispatch Proxy → Client
+                this.connections.push({
+                    from: gatewayDevice,
+                    to: clientDevice,
+                    enabled: true
+                });
+            });
+        } else if (loadBalancerDevices.length > 0) {
+            // If no active sources but we have load balancers, show at least the infrastructure
+            console.info('No active client sources found. Showing infrastructure only.');
+        } else {
+            // No load balancers and no active sources - show minimal topology
+            console.warn('No load balancers or active sources found. Showing minimal topology.');
+        }
+        
+        // Initialize particles
+        this.initializeParticles();
         
         // Update statistics
         this.updateStatistics(config, stats);
     }
-
-    addSampleClients(stats) {
-        const clientCount = Math.min(Math.max(stats.active_connections || 0, 3), 8);
-        const clients = [
-            { name: 'MacBook Pro', icon: 'laptop', ip: '192.168.1.100' },
-            { name: 'iPhone 13', icon: 'mobile-alt', ip: '192.168.1.101' },
-            { name: 'iPad Air', icon: 'tablet-alt', ip: '192.168.1.102' },
-            { name: 'Desktop PC', icon: 'desktop', ip: '192.168.1.103' },
-            { name: 'Smart TV', icon: 'tv', ip: '192.168.1.104' },
-            { name: 'Router', icon: 'wifi', ip: '192.168.1.1' },
-            { name: 'Android Phone', icon: 'mobile-alt', ip: '192.168.1.105' },
-            { name: 'Gaming Console', icon: 'gamepad', ip: '192.168.1.106' }
-        ];
-        
-        for (let i = 0; i < clientCount; i++) {
-            const client = clients[i] || { name: `Client ${i + 1}`, icon: 'laptop', ip: `192.168.1.${110 + i}` };
-            const clientNode = {
-                id: `client_${i}`,
-                type: 'client',
-                name: client.name,
-                ip: client.ip,
-                icon: client.icon,
-                connections: Math.floor(Math.random() * 5) + 1,
-                throughput: this.formatBytes(Math.random() * 1000000),
-                status: 'active'
-            };
-            this.nodes.push(clientNode);
-            
-            // Create link between client and proxy
-            const traffic = this.calculateTrafficLevel(clientNode.connections);
-            this.links.push({
-                source: clientNode.id,
-                target: 'proxy',
-                type: 'client-to-proxy',
-                traffic: traffic,
-                bandwidth: clientNode.throughput,
-                connections: clientNode.connections,
-                enabled: true
-            });
-        }
+    
+    // Helper methods for real data processing
+    calculateLBTraffic(lbStats, direction) {
+        // Estimate traffic based on connection count and success rate
+        const connections = lbStats.total_connections || 0;
+        const successRate = (lbStats.success_rate || 0) / 100;
+        const baseTraffic = connections * successRate * 1000; // rough estimate
+        return direction === 'in' ? baseTraffic * 0.8 : baseTraffic * 0.2; // 80/20 split
     }
-
-    calculateTrafficLevel(connections) {
-        if (connections >= 10) return 'high-traffic';
-        if (connections >= 3) return 'medium-traffic';
-        return 'low-traffic';
+    
+    estimateClientTraffic(source, direction) {
+        // Estimate client traffic based on active connections
+        const activeConnections = source.active_connections || 0;
+        const baseTraffic = activeConnections * 50000; // 50KB per connection estimate
+        return direction === 'in' ? baseTraffic * 0.7 : baseTraffic * 0.3; // 70/30 split
     }
-
-    calculateTotalThroughput(stats) {
-        return this.formatBytes((stats.bytes_in || 0) + (stats.bytes_out || 0));
+    
+    guessDeviceType(sourceIP) {
+        // Simple device type guessing based on IP patterns
+        const lastOctet = parseInt(sourceIP.split('.').pop());
+        
+        if (lastOctet < 10) return 'accesspoint';
+        if (lastOctet < 50) return 'iphone';
+        if (lastOctet < 100) return 'ipad';
+        if (lastOctet < 150) return 'macbook';
+        if (lastOctet < 200) return 'nas';
+        return 'chromecast';
     }
-
-    formatBytes(bytes) {
-        if (bytes === 0) return '0 B';
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-    }
-
-    renderTopology() {
-        // Setup force simulation
-        this.simulation = d3.forceSimulation(this.nodes)
-            .force('link', d3.forceLink(this.links).id(d => d.id).distance(150))
-            .force('charge', d3.forceManyBody().strength(-800))
-            .force('center', d3.forceCenter(this.width / 2, this.height / 2))
-            .force('collision', d3.forceCollide().radius(50));
-        
-        // Render links
-        this.renderLinks();
-        
-        // Render nodes
-        this.renderNodes();
-        
-        // Start flow animations
-        this.animateFlows();
-        
-        // Update positions on simulation tick
-        this.simulation.on('tick', () => {
-            this.updatePositions();
-        });
-    }
-
-    renderLinks() {
-        const link = this.linkGroup
-            .selectAll('.link')
-            .data(this.links)
-            .enter()
-            .append('line')
-            .attr('class', d => `link ${d.traffic}`)
-            .attr('stroke-width', d => {
-                switch(d.traffic) {
-                    case 'high-traffic': return 4;
-                    case 'medium-traffic': return 3;
-                    default: return 2;
-                }
-            })
-            .attr('stroke', d => {
-                if (!d.enabled) return '#444';
-                switch(d.traffic) {
-                    case 'high-traffic': return '#ff4757';
-                    case 'medium-traffic': return '#ffa502';
-                    default: return '#2ed573';
-                }
-            })
-            .attr('opacity', d => d.enabled ? 0.8 : 0.3);
-    }
-
-    renderNodes() {
-        const node = this.nodeGroup
-            .selectAll('.node')
-            .data(this.nodes)
-            .enter()
-            .append('g')
-            .attr('class', 'node')
-            .call(d3.drag()
-                .on('start', (event, d) => this.dragStarted(event, d))
-                .on('drag', (event, d) => this.dragged(event, d))
-                .on('end', (event, d) => this.dragEnded(event, d))
-            )
-            .on('click', (event, d) => this.showDeviceDetails(d));
-        
-        // Add circles for nodes
-        node.append('circle')
-            .attr('class', d => `node-circle ${d.type}`)
-            .attr('r', d => {
-                switch(d.type) {
-                    case 'proxy': return 25;
-                    case 'load-balancer': return 20;
-                    default: return 15;
-                }
-            });
-        
-        // Add icons for nodes
-        node.append('text')
-            .attr('class', 'node-icon')
-            .attr('text-anchor', 'middle')
-            .attr('dy', '0.35em')
-            .style('font-family', 'Font Awesome 6 Free')
-            .style('font-weight', '900')
-            .style('font-size', d => {
-                switch(d.type) {
-                    case 'proxy': return '16px';
-                    case 'load-balancer': return '12px';
-                    default: return '10px';
-                }
-            })
-            .style('fill', 'white')
-            .text(d => {
-                switch(d.type) {
-                    case 'proxy': return '\uf0e8'; // fa-sitemap
-                    case 'load-balancer': return '\uf233'; // fa-server
-                    default: return this.getClientIcon(d.icon);
-                }
-            });
-        
-        // Add labels
-        node.append('text')
-            .attr('class', 'node-label')
-            .attr('text-anchor', 'middle')
-            .attr('dy', '35px')
-            .text(d => d.name);
-        
-        // Add stats
-        node.append('text')
-            .attr('class', 'node-stats')
-            .attr('text-anchor', 'middle')
-            .attr('dy', '48px')
-            .text(d => d.throughput || d.ip);
-    }
-
-    getClientIcon(iconType) {
-        const icons = {
-            'laptop': '\uf109',     // fa-laptop
-            'mobile-alt': '\uf3cd', // fa-mobile-alt
-            'tablet-alt': '\uf3fa', // fa-tablet-alt
-            'desktop': '\uf108',    // fa-desktop
-            'tv': '\uf26c',         // fa-tv
-            'wifi': '\uf1eb',       // fa-wifi
-            'gamepad': '\uf11b'     // fa-gamepad
+    
+    getDeviceName(sourceIP) {
+        // Generate realistic device names based on IP
+        const deviceTypes = {
+            'accesspoint': ['Access Point', 'AP Estudi', 'UniFi AP'],
+            'iphone': ['iPhone', 'iPhone 13', 'iPhone Pro'],
+            'ipad': ['iPad', 'iPad Pro', 'iPad Air'],
+            'macbook': ['MacBook', 'MacBook Pro', 'MacBook Air'],
+            'nas': ['Synology NAS', 'QNAP NAS', 'Storage'],
+            'chromecast': ['Chromecast', 'Chromecast Audio', 'Google TV']
         };
-        return icons[iconType] || '\uf109'; // default to laptop
+        
+        const type = this.guessDeviceType(sourceIP);
+        const names = deviceTypes[type] || ['Device'];
+        return names[Math.floor(Math.random() * names.length)];
     }
 
-    animateFlows() {
-        // Remove existing flow particles
-        this.flowGroup.selectAll('.flow-particle').remove();
+    formatSpeed(bytesPerSecond) {
+        if (bytesPerSecond === 0) return '0 bps';
         
-        // Add flow particles for active links
-        this.links.filter(d => d.enabled).forEach(link => {
-            this.createFlowParticles(link);
+        const units = ['bps', 'Kbps', 'Mbps', 'Gbps'];
+        let value = bytesPerSecond * 8;
+        let unitIndex = 0;
+        
+        while (value >= 1000 && unitIndex < units.length - 1) {
+            value /= 1000;
+            unitIndex++;
+        }
+        
+        return `${value.toFixed(1)} ${units[unitIndex]}`;
+    }
+
+    initializeParticles() {
+        this.particles = [];
+        this.connections.forEach((connection, connIndex) => {
+            if (connection.enabled) {
+                // Calculate particle count based on bandwidth usage - MUCH more conservative
+                const maxBandwidth = this.getDeviceMaxBandwidth(connection.to);
+                const currentUsage = this.getDeviceCurrentUsage(connection.to);
+                const usageRatio = Math.min(1, currentUsage / Math.max(maxBandwidth, 1));
+                
+                // Drastically reduced particle count for performance
+                const particleCount = Math.max(1, Math.round(2 + usageRatio * 4)); // 1-6 particles total
+                
+                for (let i = 0; i < particleCount; i++) {
+                    const baseSpeed = 0.008 + (usageRatio * 0.012); 
+                    this.particles.push({
+                        connectionIndex: connIndex,
+                        progress: Math.random(),
+                        lateralOffset: (Math.random() - 0.5) * 4, // Small random offset
+                        speed: baseSpeed + Math.random() * 0.008,
+                        size: 1.5 + Math.random() * 1, // Slightly larger but fewer
+                        opacity: 0.6 + (usageRatio * 0.3) + Math.random() * 0.1
+                    });
+                }
+            }
         });
     }
 
-    createFlowParticles(link) {
-        const particleCount = this.getParticleCount(link.traffic);
+    startAnimation() {
+        const animate = () => {
+            this.render();
+            this.updateParticles();
+            this.animationFrame = requestAnimationFrame(animate);
+        };
+        animate();
+    }
+
+    render() {
+        // Clear canvas
+        this.ctx.fillStyle = this.colors.background;
+        this.ctx.fillRect(0, 0, this.width, this.height);
         
-        for (let i = 0; i < particleCount; i++) {
-            setTimeout(() => {
-                const particle = this.flowGroup
-                    .append('circle')
-                    .attr('class', 'flow-particle')
-                    .attr('r', 2)
-                    .attr('fill', this.getParticleColor(link.traffic))
-                    .attr('opacity', 0);
+        // Draw connections
+        this.drawConnections();
+        
+        // Draw particles
+        this.drawParticles();
+        
+        // Draw devices
+        this.drawDevices();
+    }
+
+    drawConnections() {
+        this.connections.forEach(connection => {
+            if (connection.enabled) {
+                const fromX = connection.from.x;
+                const fromY = connection.from.y;
+                const toX = connection.to.x;
+                const toY = connection.to.y;
                 
-                this.animateParticle(particle, link);
-            }, i * (2000 / particleCount) / this.animationSpeed);
+                // Calculate bandwidth-based line thickness
+                const maxBandwidth = this.getDeviceMaxBandwidth(connection.to);
+                const currentUsage = this.getDeviceCurrentUsage(connection.to);
+                const usageRatio = Math.min(1, currentUsage / Math.max(maxBandwidth, 1));
+                
+                // Line thickness based on max bandwidth (2-8px) - thicker lines
+                const baseThickness = Math.max(2, Math.min(8, Math.log10(maxBandwidth + 1) * 2));
+                const lineWidth = baseThickness * (0.5 + usageRatio * 0.5); // Varies with usage
+                
+                // Line opacity based on usage
+                const opacity = 0.6 + (usageRatio * 0.4); // 60% to 100% opacity
+                
+                this.ctx.strokeStyle = this.colors.connectionLine;
+                this.ctx.lineWidth = lineWidth;
+                this.ctx.lineCap = 'round';
+                this.ctx.globalAlpha = opacity;
+                this.ctx.beginPath();
+                
+                                // Create clean, straight right-angled connections
+                const deltaX = toX - fromX;
+                const deltaY = toY - fromY;
+                
+                this.ctx.moveTo(fromX, fromY);
+                
+                if (Math.abs(deltaY) < 20) {
+                    // Horizontal connection - completely straight
+                    this.ctx.lineTo(toX, fromY); // Keep same Y level
+                } else {
+                    // Right-angled connection: horizontal then vertical then horizontal
+                    const midX = fromX + deltaX * 0.6; // 60% of the way horizontally
+                    
+                    // 1. Horizontal line from source
+                    this.ctx.lineTo(midX, fromY);
+                    // 2. Vertical line to target Y level
+                    this.ctx.lineTo(midX, toY);
+                    // 3. Final horizontal line to target
+                    this.ctx.lineTo(toX, toY);
+                }
+                
+                this.ctx.stroke();
+                this.ctx.globalAlpha = 1;
+            }
+        });
+    }
+
+    // Helper methods for bandwidth calculation
+    getDeviceMaxBandwidth(device) {
+        // Extract bandwidth from speed strings and convert to numeric value
+        const downloadSpeed = this.parseSpeed(device.downloadSpeed);
+        const uploadSpeed = this.parseSpeed(device.uploadSpeed);
+        return Math.max(downloadSpeed, uploadSpeed);
+    }
+
+    getDeviceCurrentUsage(device) {
+        // For demo purposes, use current speed as usage
+        // In real implementation, this would come from actual usage stats
+        const downloadSpeed = this.parseSpeed(device.downloadSpeed);
+        const uploadSpeed = this.parseSpeed(device.uploadSpeed);
+        return (downloadSpeed + uploadSpeed) / 2;
+    }
+
+    parseSpeed(speedString) {
+        // Parse speed strings like "123.4 Mbps" to numeric Kbps value
+        if (!speedString || speedString === '0 bps') return 0;
+        
+        const parts = speedString.split(' ');
+        const value = parseFloat(parts[0]);
+        const unit = parts[1];
+        
+        switch(unit) {
+            case 'bps': return value / 1000;
+            case 'Kbps': return value;
+            case 'Mbps': return value * 1000;
+            case 'Gbps': return value * 1000000;
+            default: return value;
         }
     }
 
-    getParticleCount(traffic) {
-        switch(traffic) {
-            case 'high-traffic': return 6;
-            case 'medium-traffic': return 4;
-            default: return 2;
+    drawParticles() {
+        this.ctx.fillStyle = this.colors.particle;
+        this.ctx.shadowColor = this.colors.particle;
+        this.ctx.shadowBlur = 4;
+        
+        this.particles.forEach(particle => {
+            const connection = this.connections[particle.connectionIndex];
+            if (!connection || !connection.enabled) return;
+            
+            const basePos = this.getParticlePosition(connection, particle.progress);
+            
+            // Apply lateral offset for width distribution
+            const connectionAngle = Math.atan2(
+                connection.to.y - connection.from.y,
+                connection.to.x - connection.from.x
+            );
+            
+            // Calculate perpendicular offset
+            const offsetX = Math.cos(connectionAngle + Math.PI/2) * particle.lateralOffset;
+            const offsetY = Math.sin(connectionAngle + Math.PI/2) * particle.lateralOffset;
+            
+            const finalPos = {
+                x: basePos.x + offsetX,
+                y: basePos.y + offsetY
+            };
+            
+            this.ctx.globalAlpha = particle.opacity;
+            this.ctx.beginPath();
+            this.ctx.arc(finalPos.x, finalPos.y, particle.size, 0, Math.PI * 2);
+            this.ctx.fill();
+        });
+        
+        this.ctx.shadowBlur = 0;
+        this.ctx.globalAlpha = 1;
+    }
+
+    getParticlePosition(connection, progress) {
+        const fromX = connection.from.x;
+        const fromY = connection.from.y;
+        const toX = connection.to.x;
+        const toY = connection.to.y;
+        const deltaX = toX - fromX;
+        const deltaY = toY - fromY;
+        
+        const t = progress;
+        
+        if (Math.abs(deltaY) < 20) {
+            // Horizontal connection - completely straight
+            return {
+                x: fromX + (toX - fromX) * t,
+                y: fromY // Keep same Y level
+            };
+        } else {
+            // Right-angled connection: horizontal then vertical then horizontal
+            const midX = fromX + deltaX * 0.6;
+            
+            // Calculate total path length for proper progress distribution
+            const segment1Length = midX - fromX; // horizontal
+            const segment2Length = Math.abs(toY - fromY); // vertical
+            const segment3Length = toX - midX; // final horizontal
+            const totalLength = segment1Length + segment2Length + segment3Length;
+            
+            // Normalize segment lengths
+            const seg1Ratio = segment1Length / totalLength;
+            const seg2Ratio = segment2Length / totalLength;
+            
+            if (t <= seg1Ratio) {
+                // First segment: horizontal from source
+                const localT = t / seg1Ratio;
+                return {
+                    x: fromX + (midX - fromX) * localT,
+                    y: fromY
+                };
+            } else if (t <= seg1Ratio + seg2Ratio) {
+                // Second segment: vertical to target Y level
+                const localT = (t - seg1Ratio) / seg2Ratio;
+                return {
+                    x: midX,
+                    y: fromY + (toY - fromY) * localT
+                };
+            } else {
+                // Third segment: final horizontal to target
+                const localT = (t - seg1Ratio - seg2Ratio) / (1 - seg1Ratio - seg2Ratio);
+                return {
+                    x: midX + (toX - midX) * localT,
+                    y: toY
+                };
+            }
         }
     }
 
-    getParticleColor(traffic) {
-        switch(traffic) {
-            case 'high-traffic': return '#ff4757';
-            case 'medium-traffic': return '#ffa502';
-            default: return '#2ed573';
-        }
+    drawDevices() {
+        this.devices.forEach(device => {
+            // Draw device image without frame (like UDM)
+            if (this.images[device.type]) {
+                // Draw image directly without clipping to circle
+                this.ctx.save();
+                
+                // Draw device image as rectangle (like UDM)
+                const imageSize = device.size * 0.8; // Slightly smaller than device area
+                this.ctx.drawImage(
+                    this.images[device.type],
+                    device.x - imageSize / 2,
+                    device.y - imageSize / 2,
+                    imageSize,
+                    imageSize
+                );
+                
+                this.ctx.restore();
+            } else {
+                // Fallback rounded square (not circle)
+                this.ctx.fillStyle = this.getDeviceColor(device.type);
+                const rectSize = device.size * 0.7;
+                const cornerRadius = 8;
+                
+                this.ctx.beginPath();
+                this.ctx.roundRect(
+                    device.x - rectSize / 2,
+                    device.y - rectSize / 2,
+                    rectSize,
+                    rectSize,
+                    cornerRadius
+                );
+                this.ctx.fill();
+            }
+            
+            // Device name
+            this.ctx.fillStyle = this.colors.text;
+            this.ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText(device.name, device.x, device.y + device.size / 2 + 16);
+            
+            // Download speed (blue)
+            this.ctx.fillStyle = this.colors.downloadSpeed;
+            this.ctx.font = '10px "SF Mono", Monaco, "Consolas", monospace';
+            this.ctx.fillText(`↓ ${device.downloadSpeed}`, device.x, device.y + device.size / 2 + 30);
+            
+            // Upload speed (orange) 
+            this.ctx.fillStyle = this.colors.uploadSpeed;
+            this.ctx.fillText(`↑ ${device.uploadSpeed}`, device.x, device.y + device.size / 2 + 42);
+        });
     }
 
-    animateParticle(particle, link) {
-        const sourceNode = this.nodes.find(n => n.id === link.source.id || n.id === link.source);
-        const targetNode = this.nodes.find(n => n.id === link.target.id || n.id === link.target);
+    getDeviceColor(type) {
+        const colors = {
+            'isp': '#006fff',
+            'gateway': '#006fff',
+            'load-balancer': '#f5a524',
+            'nas': '#50565e',
+            'chromecast': '#50565e',
+            'accesspoint': '#50565e',
+            'iphone': '#50565e',
+            'ipad': '#50565e',
+            'printer': '#50565e',
+            'macbook': '#50565e'
+        };
+        return colors[type] || '#50565e';
+    }
+
+    updateParticles() {
+        this.particles.forEach(particle => {
+            particle.progress += particle.speed * this.animationSpeed;
+            
+            if (particle.progress > 1) {
+                particle.progress = 0;
+                // Add some randomness to the next cycle
+                particle.speed = 0.005 + Math.random() * 0.003;
+            }
+        });
+    }
+
+    handleCanvasClick(event) {
+        const rect = this.canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
         
-        if (!sourceNode || !targetNode) return;
+        // Check if click is on a device
+        const clickedDevice = this.devices.find(device => {
+            const distance = Math.sqrt((x - device.x) ** 2 + (y - device.y) ** 2);
+            return distance <= device.size / 2;
+        });
         
-        particle
-            .attr('cx', sourceNode.x)
-            .attr('cy', sourceNode.y)
-            .transition()
-            .duration(2000 / this.animationSpeed)
-            .ease(d3.easeLinear)
-            .attr('cx', targetNode.x)
-            .attr('cy', targetNode.y)
-            .attr('opacity', 1)
-            .transition()
-            .duration(200)
-            .attr('opacity', 0)
-            .remove();
-    }
-
-    updatePositions() {
-        this.linkGroup.selectAll('.link')
-            .attr('x1', d => d.source.x)
-            .attr('y1', d => d.source.y)
-            .attr('x2', d => d.target.x)
-            .attr('y2', d => d.target.y);
-        
-        this.nodeGroup.selectAll('.node')
-            .attr('transform', d => `translate(${d.x},${d.y})`);
-    }
-
-    // Event handlers
-    dragStarted(event, d) {
-        if (!event.active) this.simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
-    }
-
-    dragged(event, d) {
-        d.fx = event.x;
-        d.fy = event.y;
-    }
-
-    dragEnded(event, d) {
-        if (!event.active) this.simulation.alphaTarget(0);
-        if (d.id !== 'proxy') { // Keep proxy fixed
-            d.fx = null;
-            d.fy = null;
+        if (clickedDevice) {
+            this.showDeviceDetails(clickedDevice);
         }
     }
 
@@ -471,69 +666,83 @@ class NetworkTopology {
         
         content.innerHTML = `
             <div style="margin-bottom: 16px;">
-                <h4 style="margin: 0 0 8px 0; color: var(--unifi-text-primary);">Device Information</h4>
+                <h4>Device Information</h4>
                 <p><strong>Type:</strong> ${device.type.replace('-', ' ')}</p>
-                <p><strong>IP Address:</strong> ${device.ip}</p>
-                <p><strong>Status:</strong> <span style="color: ${device.status === 'active' ? '#2ed573' : '#ff4757'}">${device.status}</span></p>
+                <p><strong>Address:</strong> ${device.subtitle}</p>
             </div>
             
             <div style="margin-bottom: 16px;">
-                <h4 style="margin: 0 0 8px 0; color: var(--unifi-text-primary);">Traffic Statistics</h4>
-                <p><strong>Connections:</strong> ${device.connections || 0}</p>
-                <p><strong>Throughput:</strong> ${device.throughput || '0 B'}</p>
-                ${device.ratio ? `<p><strong>Load Ratio:</strong> ${device.ratio}</p>` : ''}
-                ${device.interface ? `<p><strong>Interface:</strong> ${device.interface}</p>` : ''}
+                <h4>Traffic Statistics</h4>
+                <p><strong>Download:</strong> ${device.downloadSpeed}</p>
+                <p><strong>Upload:</strong> ${device.uploadSpeed}</p>
             </div>
-            
-            ${device.type === 'load-balancer' ? `
-            <div style="margin-bottom: 16px;">
-                <h4 style="margin: 0 0 8px 0; color: var(--unifi-text-primary);">Load Balancer Controls</h4>
-                <button class="btn btn-secondary btn-sm" onclick="toggleLoadBalancer('${device.id}')" style="margin-right: 8px;">
-                    ${device.enabled ? 'Disable' : 'Enable'}
-                </button>
-                <button class="btn btn-danger btn-sm" onclick="removeLoadBalancer('${device.ip}')">
-                    Remove
-                </button>
-            </div>
-            ` : ''}
         `;
         
         panel.classList.add('active');
     }
 
-    updateStatistics(config, stats) {
-        document.getElementById('totalThroughput').textContent = 
-            this.formatBytes((stats.bytes_in || 0) + (stats.bytes_out || 0)) + '/s';
-        document.getElementById('activeConnections').textContent = stats.active_connections || 0;
-        document.getElementById('loadBalancers').textContent = config.load_balancers?.length || 0;
-        document.getElementById('uniqueClients').textContent = this.nodes.filter(n => n.type === 'client').length;
+    showLoading(show) {
+        const loadingElement = document.querySelector('.topology-loading');
+        if (loadingElement) {
+            if (show) {
+                loadingElement.classList.remove('hidden');
+            } else {
+                loadingElement.classList.add('hidden');
+            }
+        }
     }
 
     showError(message) {
         const container = document.getElementById('networkTopology');
         container.innerHTML = `
             <div class="topology-error">
-                <i class="fas fa-exclamation-triangle"></i>
+                <div style="font-size: 48px; margin-bottom: 16px; color: var(--unifi-danger);">⚠️</div>
                 <h3>Error Loading Topology</h3>
                 <p>${message}</p>
-                <button class="btn btn-primary" onclick="networkTopology.loadTopologyData()">
-                    <i class="fas fa-retry"></i>
-                    Retry
+                <button class="btn btn-primary" onclick="location.reload()" style="margin-top: 16px;">
+                    🔄 Reload Page
                 </button>
             </div>
         `;
     }
 
-    setupControls() {
-        // Animation speed control
-        document.getElementById('animationSpeed').addEventListener('input', (e) => {
-            this.setAnimationSpeed(parseFloat(e.target.value));
+    updateStatistics(config, stats) {
+        const trafficStats = stats.traffic_stats || {};
+        const totalThroughput = this.formatSpeed((trafficStats.bytes_in_per_second || 0) + (trafficStats.bytes_out_per_second || 0));
+        const activeConnections = trafficStats.active_connections || 0;
+        const loadBalancers = config.load_balancers?.length || 0;
+        const uniqueClients = this.devices.filter(d => d.type !== 'isp' && d.type !== 'gateway' && d.type !== 'load-balancer').length;
+
+        const elements = {
+            'totalThroughput': totalThroughput,
+            'activeConnections': activeConnections,
+            'loadBalancers': loadBalancers,
+            'uniqueClients': uniqueClients
+        };
+
+        Object.keys(elements).forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.textContent = elements[id];
+            }
         });
+    }
+
+    setupControls() {
+        const speedControl = document.getElementById('animationSpeed');
+        if (speedControl) {
+            speedControl.addEventListener('input', (e) => {
+                this.setAnimationSpeed(parseFloat(e.target.value));
+            });
+        }
     }
 
     setAnimationSpeed(speed) {
         this.animationSpeed = speed;
-        document.getElementById('speedValue').textContent = speed + 'x';
+        const speedValue = document.getElementById('speedValue');
+        if (speedValue) {
+            speedValue.textContent = speed + 'x';
+        }
     }
 
     handleResize() {
@@ -543,16 +752,13 @@ class NetworkTopology {
         this.width = rect.width;
         this.height = rect.height;
         
-        this.svg
-            .attr('width', this.width)
-            .attr('height', this.height);
-        
-        if (this.simulation) {
-            this.simulation
-                .force('center', d3.forceCenter(this.width / 2, this.height / 2))
-                .alpha(0.3)
-                .restart();
+        if (this.canvas) {
+            this.canvas.width = this.width;
+            this.canvas.height = this.height;
         }
+        
+        // Re-layout devices
+        this.loadTopologyData();
     }
 
     startAutoRefresh() {
@@ -560,11 +766,13 @@ class NetworkTopology {
         this.refreshInterval = setInterval(() => {
             if (this.autoRefresh) {
                 this.loadTopologyData();
-                this.animateFlows(); // Refresh flow animations
             }
         }, 5000);
         
-        document.getElementById('autoRefreshBtn').innerHTML = '<i class="fas fa-pause"></i>';
+        const btn = document.getElementById('autoRefreshBtn');
+        if (btn) {
+            btn.innerHTML = '<i class="fas fa-pause"></i>';
+        }
     }
 
     stopAutoRefresh() {
@@ -573,7 +781,19 @@ class NetworkTopology {
             clearInterval(this.refreshInterval);
         }
         
-        document.getElementById('autoRefreshBtn').innerHTML = '<i class="fas fa-play"></i>';
+        const btn = document.getElementById('autoRefreshBtn');
+        if (btn) {
+            btn.innerHTML = '<i class="fas fa-play"></i>';
+        }
+    }
+
+    destroy() {
+        if (this.animationFrame) {
+            cancelAnimationFrame(this.animationFrame);
+        }
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+        }
     }
 }
 
@@ -581,50 +801,49 @@ class NetworkTopology {
 let networkTopology;
 
 function refreshTopology() {
-    networkTopology.loadTopologyData();
+    if (networkTopology) {
+        networkTopology.loadTopologyData();
+    }
 }
 
 function toggleAutoRefresh() {
-    if (networkTopology.autoRefresh) {
-        networkTopology.stopAutoRefresh();
-    } else {
-        networkTopology.startAutoRefresh();
+    if (networkTopology) {
+        if (networkTopology.autoRefresh) {
+            networkTopology.stopAutoRefresh();
+        } else {
+            networkTopology.startAutoRefresh();
+        }
     }
 }
 
 function setAnimationSpeed(speed) {
-    networkTopology.setAnimationSpeed(speed);
+    if (networkTopology) {
+        networkTopology.setAnimationSpeed(speed);
+    }
 }
 
 function changeViewMode(mode) {
-    networkTopology.viewMode = mode;
-    networkTopology.loadTopologyData();
+    if (networkTopology) {
+        networkTopology.loadTopologyData();
+    }
 }
 
 function centerTopology() {
-    if (networkTopology.svg && networkTopology.zoomBehavior) {
-        networkTopology.svg
-            .transition()
-            .duration(750)
-            .call(networkTopology.zoomBehavior.transform, d3.zoomIdentity);
+    if (networkTopology) {
+        networkTopology.loadTopologyData();
     }
 }
 
 function closeDevicePanel() {
-    document.getElementById('deviceDetailsPanel').classList.remove('active');
-}
-
-function toggleLoadBalancer(id) {
-    // Implementation for toggling load balancer
-    console.log('Toggle load balancer:', id);
-}
-
-function removeLoadBalancer(address) {
-    // Implementation for removing load balancer
-    console.log('Remove load balancer:', address);
+    const panel = document.getElementById('deviceDetailsPanel');
+    if (panel) {
+        panel.classList.remove('active');
+    }
 }
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    networkTopology = new NetworkTopology();
-}); 
+    setTimeout(() => {
+        networkTopology = new NetworkTopology();
+    }, 100);
+});
