@@ -101,9 +101,10 @@ func getCSS() string {
 	mainCSS := loadStaticFile(filepath.Join("web", "static", "css", "main.css"))
 	loginCSS := loadStaticFile(filepath.Join("web", "static", "css", "login.css"))
 	dashboardCSS := loadStaticFile(filepath.Join("web", "static", "css", "dashboard.css"))
+	settingsCSS := loadStaticFile(filepath.Join("web", "static", "css", "settings.css"))
 	
 	// Combine all CSS files
-	return mainCSS + "\n\n" + loginCSS + "\n\n" + dashboardCSS
+	return mainCSS + "\n\n" + loginCSS + "\n\n" + dashboardCSS + "\n\n" + settingsCSS
 }
 
 /*
@@ -113,9 +114,25 @@ func getJavaScript() string {
 	// Load main JS
 	mainJS := loadStaticFile(filepath.Join("web", "static", "js", "main.js"))
 	dashboardJS := loadStaticFile(filepath.Join("web", "static", "js", "dashboard.js"))
+	settingsJS := loadStaticFile(filepath.Join("web", "static", "js", "settings.js"))
 	
 	// Combine all JS files
-	return mainJS + "\n\n" + dashboardJS
+	return mainJS + "\n\n" + dashboardJS + "\n\n" + settingsJS
+}
+
+/*
+Load and return settings HTML template content
+*/
+func getSettingsHTML() string {
+	templatePath := filepath.Join("web", "templates", "settings.html")
+	content, err := ioutil.ReadFile(templatePath)
+	if err != nil {
+		// Fallback template
+		return `<!DOCTYPE html>
+<html><head><title>Settings Error</title></head>
+<body><h1>Template Error</h1><p>Could not load settings template: ` + err.Error() + `</p></body></html>`
+	}
+	return string(content)
 }
 
 /*

@@ -15,13 +15,13 @@
         <header class="header">
             <div class="header-left">
                 <div class="header-logo">
-                    <span class="logo-text">UniFi</span>
+                    <span class="logo-text">DPE</span>
                 </div>
                 <nav class="header-nav">
-                    <a href="#" class="nav-item active">Dashboard</a>
+                    <a href="/" class="nav-item active">Dashboard</a>
                     <a href="#" class="nav-item">Network</a>
                     <a href="#" class="nav-item">Devices</a>
-                    <a href="#" class="nav-item">Settings</a>
+                    <a href="/settings" class="nav-item">Settings</a>
                 </nav>
             </div>
             <div class="header-right">
@@ -86,12 +86,19 @@
 
             <!-- Real-time Traffic Grid -->
             <section class="traffic-grid">
-                <div class="traffic-card">
+                <!-- <div class="traffic-card">
                     <h4 class="traffic-card-title">Combined Speed</h4>
                     <div class="traffic-card-value" id="bytesPerSecond">
                         {{formatBytes .TrafficStats.BytesPerSecond}}/s
                     </div>
                     <p class="traffic-card-unit speed-bits">0 bit/s</p>
+                </div> -->
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Download Speed</h4>
+                    <div class="traffic-card-value" id="downloadSpeed">
+                        {{formatBytes .TrafficStats.BytesInPerSecond}}/s
+                    </div>
+                    <p class="traffic-card-unit speed-bits" id="downloadSpeedBits">0 bit/s</p>
                 </div>
                 
                 <div class="traffic-card">
@@ -102,13 +109,7 @@
                     <p class="traffic-card-unit speed-bits" id="uploadSpeedBits">0 bit/s</p>
                 </div>
                 
-                <div class="traffic-card">
-                    <h4 class="traffic-card-title">Download Speed</h4>
-                    <div class="traffic-card-value" id="downloadSpeed">
-                        {{formatBytes .TrafficStats.BytesInPerSecond}}/s
-                    </div>
-                    <p class="traffic-card-unit speed-bits" id="downloadSpeedBits">0 bit/s</p>
-                </div>
+
                 
                 <div class="traffic-card">
                     <h4 class="traffic-card-title">Total Data</h4>

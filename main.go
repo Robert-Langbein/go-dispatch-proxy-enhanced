@@ -10,12 +10,31 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// Gateway mode configuration
+type gateway_config struct {
+	enabled             bool
+	transparent_port    int
+	dns_port           int
+	gateway_ip         string
+	subnet_cidr        string
+	iptables_rules     []string
+	nat_interface      string
+	backup_rules_file  string
+	auto_configure     bool
+	dhcp_range_start   string
+	dhcp_range_end     string
+}
+
+// Global gateway configuration
+var gateway_cfg gateway_config
 
 type source_ip_rule struct {
 	SourceIP         string `json:"source_ip"`
@@ -842,11 +861,37 @@ func main() {
 	var configFile = flag.String("config", "source_ip_rules.json", "Configuration file for source IP rules")
 	var webPort = flag.Int("web", 0, "Enable web GUI on specified port (0 = disabled, 80 = recommended)")
 	var debug = flag.Bool("debug", false, "Enable detailed debug logging")
+	
+	// Gateway mode flags
+	var gatewayMode = flag.Bool("gateway", false, "Enable gateway mode (acts as default gateway with load balancing)")
+	var gatewayIP = flag.String("gateway-ip", "192.168.100.1", "Gateway IP address for gateway mode")
+	var subnetCIDR = flag.String("subnet", "192.168.100.0/24", "Subnet CIDR for gateway mode")
+	var transparentPort = flag.Int("transparent-port", 8888, "Transparent proxy port for gateway mode")
+	var dnsPort = flag.Int("dns-port", 5353, "DNS server port for gateway mode")
+	var natInterface = flag.String("nat-interface", "", "Network interface for NAT (auto-detect if empty)")
+	var autoConfig = flag.Bool("auto-config", true, "Automatically configure iptables rules for gateway mode")
+	var dhcpStart = flag.String("dhcp-start", "192.168.100.10", "DHCP range start for gateway mode")
+	var dhcpEnd = flag.String("dhcp-end", "192.168.100.100", "DHCP range end for gateway mode")
 
 	flag.Parse()
 	
 	// Set custom config file path
 	config_file = *configFile
+	
+	// Initialize gateway configuration
+	gateway_cfg = gateway_config{
+		enabled:           *gatewayMode,
+		transparent_port:  *transparentPort,
+		dns_port:         *dnsPort,
+		gateway_ip:       *gatewayIP,
+		subnet_cidr:      *subnetCIDR,
+		nat_interface:    *natInterface,
+		auto_configure:   *autoConfig,
+		dhcp_range_start: *dhcpStart,
+		dhcp_range_end:   *dhcpEnd,
+		backup_rules_file: "iptables_backup.rules",
+		iptables_rules:   make([]string, 0),
+	}
 	
 	if *detect {
 		detect_interfaces()
@@ -885,7 +930,17 @@ func main() {
 
 	// Load source IP rules configuration
 	load_source_ip_rules()
+	
+	// Initialize gateway mode if enabled
+	if gateway_cfg.enabled {
+		if err := initialize_gateway_mode(); err != nil {
+			log.Fatalf("[FATAL] Failed to initialize gateway mode: %v", err)
+		}
+	}
 
+	// Initialize web server settings
+	InitializeSettings(*lhost, *lport, *webPort, *configFile, *tunnel, *debug, *quiet, *gatewayMode, *gatewayIP, *subnetCIDR, *transparentPort, *dnsPort, *natInterface, *autoConfig, *dhcpStart, *dhcpEnd)
+	
 	// Start web server if enabled
 	if *webPort > 0 {
 		log.Printf("[INFO] Starting web server on port %d", *webPort)
@@ -920,6 +975,7 @@ func main() {
 	
 	defer l.Close()
 	defer stopWebServer()
+	defer cleanup_gateway_mode()
 
 	if (*quiet) {
 		log.SetOutput(io.Discard)
@@ -1092,3 +1148,405 @@ func get_load_balancer_stats() {
 		fmt.Println()
 	}
 }
+
+/*
+Initialize gateway mode with iptables rules and transparent proxy
+*/
+func initialize_gateway_mode() error {
+	log.Printf("[INFO] Initializing gateway mode on %s with subnet %s", gateway_cfg.gateway_ip, gateway_cfg.subnet_cidr)
+	
+	// Check if running as root (required for iptables and transparent proxy)
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("gateway mode requires root privileges")
+	}
+	
+	// Auto-detect NAT interface if not specified
+	if gateway_cfg.nat_interface == "" {
+		iface, err := detect_nat_interface()
+		if err != nil {
+			return fmt.Errorf("failed to auto-detect NAT interface: %v", err)
+		}
+		gateway_cfg.nat_interface = iface
+		log.Printf("[INFO] Auto-detected NAT interface: %s", iface)
+	}
+	
+	// Backup existing iptables rules
+	if err := backup_iptables_rules(); err != nil {
+		log.Printf("[WARN] Failed to backup iptables rules: %v", err)
+	}
+	
+	// Configure iptables rules for transparent proxy
+	if gateway_cfg.auto_configure {
+		if err := configure_iptables_rules(); err != nil {
+			return fmt.Errorf("failed to configure iptables rules: %v", err)
+		}
+	}
+	
+	// Start transparent proxy server
+	go start_transparent_proxy()
+	
+	// Start DNS server for gateway mode
+	go start_gateway_dns_server()
+	
+	log.Printf("[INFO] Gateway mode initialized successfully")
+	log.Printf("[INFO] Clients should use %s as their default gateway", gateway_cfg.gateway_ip)
+	log.Printf("[INFO] Transparent proxy listening on port %d", gateway_cfg.transparent_port)
+	log.Printf("[INFO] DNS server listening on port %d", gateway_cfg.dns_port)
+	
+	return nil
+}
+
+/*
+Detect the best NAT interface for gateway mode
+*/
+func detect_nat_interface() (string, error) {
+	// Get default route interface
+	cmd := exec.Command("ip", "route", "show", "default")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	
+	// Parse output to find interface
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "default via") {
+			parts := strings.Fields(line)
+			for i, part := range parts {
+				if part == "dev" && i+1 < len(parts) {
+					return parts[i+1], nil
+				}
+			}
+		}
+	}
+	
+	return "", fmt.Errorf("no default route found")
+}
+
+/*
+Backup existing iptables rules
+*/
+func backup_iptables_rules() error {
+	cmd := exec.Command("iptables-save")
+	output, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+	
+	return os.WriteFile(gateway_cfg.backup_rules_file, output, 0644)
+}
+
+/*
+Configure iptables rules for transparent proxy and NAT
+*/
+func configure_iptables_rules() error {
+	log.Printf("[INFO] Configuring iptables rules for gateway mode")
+	
+	rules := []string{
+		// Enable IP forwarding
+		"echo 1 > /proc/sys/net/ipv4/ip_forward",
+		
+		// Create custom chain for transparent proxy
+		"iptables -t nat -N DISPATCH_PROXY 2>/dev/null || true",
+		"iptables -t mangle -N DISPATCH_PROXY 2>/dev/null || true",
+		
+		// Redirect TCP traffic to transparent proxy (except for proxy itself)
+		fmt.Sprintf("iptables -t nat -A DISPATCH_PROXY -p tcp --dport 1:65535 -j REDIRECT --to-port %d", gateway_cfg.transparent_port),
+		
+		// Redirect traffic from clients to transparent proxy
+		fmt.Sprintf("iptables -t nat -A PREROUTING -s %s -p tcp --dport 1:65535 -j DISPATCH_PROXY", gateway_cfg.subnet_cidr),
+		
+		// NAT for outgoing traffic
+		fmt.Sprintf("iptables -t nat -A POSTROUTING -s %s -o %s -j MASQUERADE", gateway_cfg.subnet_cidr, gateway_cfg.nat_interface),
+		
+		// Allow forwarding for our subnet
+		fmt.Sprintf("iptables -A FORWARD -s %s -j ACCEPT", gateway_cfg.subnet_cidr),
+		fmt.Sprintf("iptables -A FORWARD -d %s -j ACCEPT", gateway_cfg.subnet_cidr),
+		
+		// DNS redirection to our DNS server
+		fmt.Sprintf("iptables -t nat -A PREROUTING -s %s -p udp --dport 53 -j REDIRECT --to-port %d", gateway_cfg.subnet_cidr, gateway_cfg.dns_port),
+		fmt.Sprintf("iptables -t nat -A PREROUTING -s %s -p tcp --dport 53 -j REDIRECT --to-port %d", gateway_cfg.subnet_cidr, gateway_cfg.dns_port),
+	}
+	
+	gateway_cfg.iptables_rules = rules
+	
+	for _, rule := range rules {
+		if strings.HasPrefix(rule, "echo") {
+			// Handle sysctl commands
+			cmd := exec.Command("sh", "-c", rule)
+			if err := cmd.Run(); err != nil {
+				log.Printf("[WARN] Failed to execute: %s - %v", rule, err)
+			}
+		} else {
+			// Handle iptables commands
+			parts := strings.Fields(rule)
+			cmd := exec.Command(parts[0], parts[1:]...)
+			if err := cmd.Run(); err != nil {
+				log.Printf("[WARN] Failed to execute: %s - %v", rule, err)
+			}
+		}
+	}
+	
+	log.Printf("[INFO] iptables rules configured successfully")
+	return nil
+}
+
+/*
+Start transparent proxy server for gateway mode
+*/
+func start_transparent_proxy() {
+	addr := fmt.Sprintf(":%d", gateway_cfg.transparent_port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Printf("[ERROR] Failed to start transparent proxy on %s: %v", addr, err)
+		return
+	}
+	defer listener.Close()
+	
+	log.Printf("[INFO] Transparent proxy started on %s", addr)
+	
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("[WARN] Failed to accept transparent proxy connection: %v", err)
+			continue
+		}
+		
+		go handle_transparent_connection(conn)
+	}
+}
+
+/*
+Handle transparent proxy connections
+*/
+func handle_transparent_connection(conn net.Conn) {
+	defer conn.Close()
+	
+	// Get original destination using SO_ORIGINAL_DST
+	originalDest, err := get_original_destination(conn)
+	if err != nil {
+		log.Printf("[WARN] Failed to get original destination: %v", err)
+		return
+	}
+	
+	source_ip := get_source_ip(conn)
+	log.Printf("[DEBUG] Transparent proxy: %s -> %s", source_ip, originalDest)
+	
+	// Use enhanced load balancer for transparent connections
+	load_balancer, i := get_enhanced_load_balancer(source_ip)
+	
+	// Create connection to target through selected load balancer
+	local_tcpaddr, _ := net.ResolveTCPAddr("tcp4", load_balancer.address)
+	dialer := net.Dialer{
+		LocalAddr: local_tcpaddr,
+		Timeout:   10 * time.Second,
+	}
+	
+	remote_conn, err := dialer.Dial("tcp", originalDest)
+	if err != nil {
+		load_balancer.failure_count++
+		log.Printf("[WARN] Transparent proxy failed to connect to %s via %s: %v", originalDest, load_balancer.address, err)
+		return
+	}
+	defer remote_conn.Close()
+	
+	load_balancer.success_count++
+	log.Printf("[DEBUG] Transparent proxy connected: %s -> %s via LB%d (%s)", source_ip, originalDest, i, load_balancer.address)
+	
+	// Add connection tracking
+	conn_id := add_active_connection(conn, originalDest, load_balancer, i)
+	pipe_connections(conn, remote_conn, conn_id)
+}
+
+/*
+Start DNS server for gateway mode
+*/
+func start_gateway_dns_server() {
+	// Simple DNS forwarder - forwards to system DNS or configured DNS servers
+	addr := fmt.Sprintf(":%d", gateway_cfg.dns_port)
+	
+	// Start UDP DNS server
+	go func() {
+		udpAddr, err := net.ResolveUDPAddr("udp", addr)
+		if err != nil {
+			log.Printf("[ERROR] Failed to resolve UDP DNS address: %v", err)
+			return
+		}
+		
+		conn, err := net.ListenUDP("udp", udpAddr)
+		if err != nil {
+			log.Printf("[ERROR] Failed to start UDP DNS server: %v", err)
+			return
+		}
+		defer conn.Close()
+		
+		log.Printf("[INFO] DNS server (UDP) started on %s", addr)
+		
+		for {
+			buffer := make([]byte, 512)
+			n, clientAddr, err := conn.ReadFromUDP(buffer)
+			if err != nil {
+				continue
+			}
+			
+			go handle_dns_query(conn, clientAddr, buffer[:n])
+		}
+	}()
+	
+	// Start TCP DNS server
+	go func() {
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			log.Printf("[ERROR] Failed to start TCP DNS server: %v", err)
+			return
+		}
+		defer listener.Close()
+		
+		log.Printf("[INFO] DNS server (TCP) started on %s", addr)
+		
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				continue
+			}
+			
+			go handle_dns_tcp_connection(conn)
+		}
+	}()
+}
+
+/*
+Handle DNS queries by forwarding to upstream DNS servers
+*/
+func handle_dns_query(conn *net.UDPConn, clientAddr *net.UDPAddr, query []byte) {
+	// Forward to system DNS (8.8.8.8 as fallback)
+	upstreamDNS := "8.8.8.8:53"
+	
+	// Try to get system DNS from /etc/resolv.conf
+	if systemDNS := get_system_dns(); systemDNS != "" {
+		upstreamDNS = systemDNS + ":53"
+	}
+	
+	// Forward query to upstream DNS
+	upstreamConn, err := net.Dial("udp", upstreamDNS)
+	if err != nil {
+		return
+	}
+	defer upstreamConn.Close()
+	
+	upstreamConn.Write(query)
+	
+	response := make([]byte, 512)
+	n, err := upstreamConn.Read(response)
+	if err != nil {
+		return
+	}
+	
+	// Send response back to client
+	conn.WriteToUDP(response[:n], clientAddr)
+}
+
+/*
+Handle TCP DNS connections
+*/
+func handle_dns_tcp_connection(conn net.Conn) {
+	defer conn.Close()
+	
+	// Read DNS query length (TCP DNS has 2-byte length prefix)
+	lengthBytes := make([]byte, 2)
+	if _, err := conn.Read(lengthBytes); err != nil {
+		return
+	}
+	
+	queryLength := int(lengthBytes[0])<<8 | int(lengthBytes[1])
+	query := make([]byte, queryLength)
+	if _, err := conn.Read(query); err != nil {
+		return
+	}
+	
+	// Forward to upstream DNS
+	upstreamDNS := "8.8.8.8:53"
+	if systemDNS := get_system_dns(); systemDNS != "" {
+		upstreamDNS = systemDNS + ":53"
+	}
+	
+	upstreamConn, err := net.Dial("tcp", upstreamDNS)
+	if err != nil {
+		return
+	}
+	defer upstreamConn.Close()
+	
+	// Send query with length prefix
+	upstreamConn.Write(lengthBytes)
+	upstreamConn.Write(query)
+	
+	// Read response
+	responseLengthBytes := make([]byte, 2)
+	if _, err := upstreamConn.Read(responseLengthBytes); err != nil {
+		return
+	}
+	
+	responseLength := int(responseLengthBytes[0])<<8 | int(responseLengthBytes[1])
+	response := make([]byte, responseLength)
+	if _, err := upstreamConn.Read(response); err != nil {
+		return
+	}
+	
+	// Send response back to client
+	conn.Write(responseLengthBytes)
+	conn.Write(response)
+}
+
+/*
+Get system DNS server from /etc/resolv.conf
+*/
+func get_system_dns() string {
+	content, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		return ""
+	}
+	
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "nameserver ") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				return parts[1]
+			}
+		}
+	}
+	
+	return ""
+}
+
+/*
+Cleanup gateway mode (restore iptables rules)
+*/
+func cleanup_gateway_mode() error {
+	if !gateway_cfg.enabled {
+		return nil
+	}
+	
+	log.Printf("[INFO] Cleaning up gateway mode...")
+	
+	// Restore iptables rules from backup
+	if _, err := os.Stat(gateway_cfg.backup_rules_file); err == nil {
+		cmd := exec.Command("iptables-restore", gateway_cfg.backup_rules_file)
+		if err := cmd.Run(); err != nil {
+			log.Printf("[WARN] Failed to restore iptables rules: %v", err)
+		} else {
+			log.Printf("[INFO] iptables rules restored from backup")
+		}
+	}
+	
+	// Remove custom chains
+	exec.Command("iptables", "-t", "nat", "-F", "DISPATCH_PROXY").Run()
+	exec.Command("iptables", "-t", "nat", "-X", "DISPATCH_PROXY").Run()
+	exec.Command("iptables", "-t", "mangle", "-F", "DISPATCH_PROXY").Run()
+	exec.Command("iptables", "-t", "mangle", "-X", "DISPATCH_PROXY").Run()
+	
+	return nil
+}
+
+
