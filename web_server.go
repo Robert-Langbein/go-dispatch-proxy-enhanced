@@ -1501,7 +1501,7 @@ func (ws *WebServer) handleAPIInterfaces(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	
 	if r.Method == "GET" {
-		// Get available network interfaces
+		// Get available network interfaces (all interfaces, filtering is done client-side)
 		interfaces := []map[string]interface{}{}
 		
 		ifaces, err := net.Interfaces()
@@ -1511,26 +1511,35 @@ func (ws *WebServer) handleAPIInterfaces(w http.ResponseWriter, r *http.Request)
 		}
 
 		for _, iface := range ifaces {
-			if (iface.Flags&net.FlagUp == net.FlagUp) && (iface.Flags&net.FlagLoopback != net.FlagLoopback) {
-				addrs, _ := iface.Addrs()
-				var ipAddr string
-				for _, addr := range addrs {
-					if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-						if ipnet.IP.To4() != nil {
-							ipAddr = ipnet.IP.String()
-							break
-						}
+			// Skip only loopback interfaces, include all others (up/down, with/without IP)
+			if (iface.Flags&net.FlagLoopback == net.FlagLoopback) {
+				continue
+			}
+			
+			addrs, _ := iface.Addrs()
+			var ipAddr string
+			var hasIPv4 bool
+			
+			// Get IPv4 address if available
+			for _, addr := range addrs {
+				if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+					if ipnet.IP.To4() != nil {
+						ipAddr = ipnet.IP.String()
+						hasIPv4 = true
+						break
 					}
 				}
-				
-				interfaceInfo := map[string]interface{}{
-					"name":  iface.Name,
-					"ip":    ipAddr,
-					"up":    (iface.Flags & net.FlagUp) != 0,
-					"mtu":   iface.MTU,
-				}
-				interfaces = append(interfaces, interfaceInfo)
 			}
+			
+			interfaceInfo := map[string]interface{}{
+				"name":     iface.Name,
+				"ip":       ipAddr,
+				"has_ip":   hasIPv4,
+				"up":       (iface.Flags & net.FlagUp) != 0,
+				"mtu":      iface.MTU,
+				"flags":    iface.Flags.String(),
+			}
+			interfaces = append(interfaces, interfaceInfo)
 		}
 		
 		json.NewEncoder(w).Encode(interfaces)

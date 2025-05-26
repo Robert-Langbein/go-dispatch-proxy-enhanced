@@ -169,12 +169,31 @@
                             <i class="fas fa-search"></i>
                             Available Network Interfaces
                         </h3>
-                        <button class="btn btn-secondary" onclick="scanInterfaces()">
-                            <i class="fas fa-sync-alt"></i>
-                            Scan Interfaces
-                        </button>
+                        <div class="header-actions">
+                            <button class="btn btn-secondary" onclick="scanInterfaces()">
+                                <i class="fas fa-sync-alt"></i>
+                                Scan Interfaces
+                            </button>
+                        </div>
                     </div>
                     <div class="settings-card-body">
+                        <!-- Interface Filter Controls -->
+                        <div class="interface-filters" style="margin-bottom: 16px;">
+                            <div class="filter-buttons">
+                                <button class="btn btn-outline-primary" id="filterAll" onclick="filterInterfaces('all')">
+                                    <i class="fas fa-list"></i>
+                                    All Interfaces
+                                </button>
+                                <button class="btn btn-outline-primary active" id="filterWithIP" onclick="filterInterfaces('with_ip')">
+                                    <i class="fas fa-network-wired"></i>
+                                    With IP Address
+                                </button>
+                            </div>
+                            <div class="filter-info" id="filterInfo" style="margin-top: 8px; font-size: 14px; color: #666;">
+                                Showing interfaces with IP addresses
+                            </div>
+                        </div>
+                        
                         <div class="interfaces-grid" id="availableInterfaces">
                             <div class="loading">
                                 <i class="fas fa-spinner fa-spin"></i>

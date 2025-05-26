@@ -4,6 +4,7 @@ class SettingsManager {
         this.currentSettings = {};
         this.availableInterfaces = [];
         this.activeLoadBalancers = [];
+        this.interfaceFilter = 'with_ip'; // 'all' or 'with_ip'
         this.init();
     }
 
@@ -106,6 +107,7 @@ class SettingsManager {
             if (response.ok) {
                 this.availableInterfaces = await response.json();
                 this.renderInterfaces();
+                this.updateFilterInfo();
             } else {
                 throw new Error('Failed to scan interfaces');
             }
@@ -118,35 +120,103 @@ class SettingsManager {
     // Render available interfaces
     renderInterfaces() {
         const container = document.getElementById('availableInterfaces');
-        if (!container || !this.availableInterfaces.length) {
+        if (!container) return;
+        
+        if (!this.availableInterfaces.length) {
             container.innerHTML = '<div class="error-message"><i class="fas fa-info-circle"></i>No network interfaces found</div>';
             return;
         }
 
-        const interfacesHTML = this.availableInterfaces.map(iface => `
+        // Filter interfaces based on current filter
+        const filteredInterfaces = this.getFilteredInterfaces();
+        
+        if (!filteredInterfaces.length) {
+            const filterText = this.interfaceFilter === 'all' ? 'interfaces' : 'interfaces with IP addresses';
+            container.innerHTML = `<div class="error-message"><i class="fas fa-info-circle"></i>No ${filterText} found</div>`;
+            return;
+        }
+
+        const interfacesHTML = filteredInterfaces.map(iface => `
             <div class="interface-card" data-interface="${iface.name}">
                 <div class="interface-card-header">
                     <div class="interface-name">
                         <i class="fas fa-network-wired"></i>
                         ${iface.name}
+                        <span class="interface-flags" style="font-size: 12px; color: #666; margin-left: 8px;">${iface.flags || ''}</span>
                     </div>
                     <div class="status-indicator ${iface.up ? '' : 'inactive'}"></div>
                 </div>
-                <div class="interface-ip">${iface.ip || 'No IP assigned'}</div>
+                <div class="interface-ip">${iface.ip || '<span style="color: #999; font-style: italic;">No IP configured</span>'}</div>
                 <div class="interface-status">
                     <span>${iface.up ? 'Active' : 'Inactive'}</span>
-                    ${iface.speed ? `• ${iface.speed}` : ''}
+                    <span style="margin-left: 8px;">MTU: ${iface.mtu || 'N/A'}</span>
                 </div>
+                ${iface.has_ip ? `
                 <div style="margin-top: 12px;">
                     <button class="btn btn-primary btn-sm" onclick="settingsManager.addInterfaceAsLB('${iface.name}', '${iface.ip}')">
                         <i class="fas fa-plus"></i>
                         Add as Load Balancer
                     </button>
                 </div>
+                ` : `
+                <div style="margin-top: 12px;">
+                    <button class="btn btn-secondary btn-sm" disabled title="Interface has no IP address">
+                        <i class="fas fa-ban"></i>
+                        Cannot Add
+                    </button>
+                </div>
+                `}
             </div>
         `).join('');
 
         container.innerHTML = interfacesHTML;
+    }
+
+    // Get filtered interfaces based on current filter
+    getFilteredInterfaces() {
+        if (this.interfaceFilter === 'with_ip') {
+            return this.availableInterfaces.filter(iface => iface.has_ip);
+        }
+        return this.availableInterfaces; // 'all'
+    }
+
+    // Filter interfaces by type
+    filterInterfaces(filterType) {
+        this.interfaceFilter = filterType;
+        
+        // Update button states
+        document.querySelectorAll('.filter-buttons button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
+        if (filterType === 'all') {
+            document.getElementById('filterAll').classList.add('active');
+        } else if (filterType === 'with_ip') {
+            document.getElementById('filterWithIP').classList.add('active');
+        }
+        
+        // Re-render interfaces with new filter
+        this.renderInterfaces();
+        this.updateFilterInfo();
+    }
+
+    // Update filter information text
+    updateFilterInfo() {
+        const filterInfo = document.getElementById('filterInfo');
+        if (!filterInfo) return;
+        
+        const totalInterfaces = this.availableInterfaces.length;
+        const withIPInterfaces = this.availableInterfaces.filter(iface => iface.has_ip).length;
+        const filteredInterfaces = this.getFilteredInterfaces().length;
+        
+        let infoText = '';
+        if (this.interfaceFilter === 'all') {
+            infoText = `Showing all ${totalInterfaces} network interfaces (${withIPInterfaces} with IP addresses)`;
+        } else if (this.interfaceFilter === 'with_ip') {
+            infoText = `Showing ${filteredInterfaces} interfaces with IP addresses (${totalInterfaces} total)`;
+        }
+        
+        filterInfo.textContent = infoText;
     }
 
     // Add interface as load balancer
@@ -718,6 +788,10 @@ function saveAllSettings() {
 
 function scanInterfaces() {
     settingsManager.scanInterfaces();
+}
+
+function filterInterfaces(filterType) {
+    settingsManager.filterInterfaces(filterType);
 }
 
 function addCustomLoadBalancer() {

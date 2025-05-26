@@ -409,6 +409,23 @@ input:checked + .toggle-slider:before {
     }
 }
 
+/* Interface Filters */
+.interface-filters {
+    border-bottom: 1px solid var(--unifi-border-primary);
+    padding-bottom: var(--unifi-space-3);
+}
+
+.filter-buttons {
+    display: flex;
+    gap: var(--unifi-space-2);
+}
+
+.filter-info {
+    font-size: var(--unifi-font-size-sm);
+    color: var(--unifi-text-secondary);
+    margin-top: var(--unifi-space-2);
+}
+
 /* Button Variants - Aligned with Dashboard */
 .btn {
     display: inline-flex;
@@ -425,6 +442,23 @@ input:checked + .toggle-slider:before {
     text-decoration: none;
     cursor: pointer;
     transition: all 0.2s ease;
+}
+
+.btn-outline-primary {
+    background-color: transparent;
+    color: var(--unifi-blue-primary);
+    border: 1px solid var(--unifi-blue-primary);
+}
+
+.btn-outline-primary:hover:not(:disabled) {
+    background-color: var(--unifi-blue-primary);
+    color: white;
+}
+
+.btn-outline-primary.active {
+    background-color: var(--unifi-blue-primary);
+    color: white;
+    border-color: var(--unifi-blue-primary);
 }
 
 .btn-primary {
