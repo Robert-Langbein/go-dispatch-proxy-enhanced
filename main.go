@@ -67,6 +67,25 @@ type traffic_stats struct {
 	LastUpdate        time.Time `json:"last_update"`
 }
 
+// Traffic sample for real-time monitoring
+type TrafficSample struct {
+	Timestamp    time.Time `json:"timestamp"`
+	TotalBytesIn int64     `json:"total_bytes_in"`
+	TotalBytesOut int64    `json:"total_bytes_out"`
+}
+
+// Client traffic tracking
+type ClientTrafficStats struct {
+	SourceIP         string          `json:"source_ip"`
+	BytesInTotal     int64           `json:"bytes_in_total"`
+	BytesOutTotal    int64           `json:"bytes_out_total"`
+	BytesInPerSecond int64           `json:"bytes_in_per_second"`
+	BytesOutPerSecond int64          `json:"bytes_out_per_second"`
+	TrafficSamples   []TrafficSample `json:"-"` // Don't expose in JSON
+	LastUpdate       time.Time       `json:"last_update"`
+	TrafficMutex     sync.RWMutex    `json:"-"` // Don't expose in JSON
+}
+
 type enhanced_load_balancer struct {
 	address             string
 	iface               string
@@ -84,6 +103,14 @@ type enhanced_load_balancer struct {
 	traffic_stats       traffic_stats              // current traffic statistics
 	bytes_transferred   int64                      // total bytes transferred
 	last_traffic_update time.Time                  // last traffic update timestamp
+	
+	// Enhanced per-LB traffic tracking
+	bytes_in_total      int64                      // total bytes received through this LB
+	bytes_out_total     int64                      // total bytes sent through this LB
+	bytes_in_per_second int64                      // current bytes/sec in through this LB
+	bytes_out_per_second int64                     // current bytes/sec out through this LB
+	traffic_samples     []TrafficSample            // recent traffic samples for this LB
+	traffic_mutex       sync.RWMutex               // mutex for traffic samples
 }
 
 // The load balancer used in the previous connection (global round robin)
@@ -119,6 +146,10 @@ var global_start_time time.Time
 // Performance counters
 var total_data_transferred int64
 
+// Global client traffic tracking
+var client_traffic_stats map[string]*ClientTrafficStats
+var client_traffic_mutex sync.RWMutex
+
 // Connection timeout and limits
 const (
 	connection_timeout = 30 * time.Second
@@ -141,6 +172,9 @@ func init() {
 	connection_mutex = &sync.RWMutex{}
 	connection_history = make([]active_connection, 0, max_connections)
 	global_start_time = time.Now()
+	
+	// Initialize client traffic tracking
+	client_traffic_stats = make(map[string]*ClientTrafficStats)
 }
 
 /*
@@ -418,9 +452,14 @@ func update_connection_traffic(conn_id string, bytes_in, bytes_out int64) {
 		if lb_index := conn.LBIndex; lb_index >= 0 && lb_index < len(lb_list) {
 			mutex.Lock()
 			lb_list[lb_index].bytes_transferred += bytes_in + bytes_out
+			lb_list[lb_index].bytes_in_total += bytes_in
+			lb_list[lb_index].bytes_out_total += bytes_out
 			lb_list[lb_index].last_traffic_update = time.Now()
-	mutex.Unlock()
+			mutex.Unlock()
 		}
+		
+		// Update client traffic stats
+		updateClientTrafficStats(conn.SourceIP, bytes_in, bytes_out)
 	}
 }
 
@@ -1539,6 +1578,120 @@ func cleanup_gateway_mode() error {
 	exec.Command("iptables", "-t", "mangle", "-X", "DISPATCH_PROXY").Run()
 	
 	return nil
+}
+
+/*
+Update client traffic statistics for real-time monitoring
+*/
+func updateClientTrafficStats(sourceIP string, bytesIn, bytesOut int64) {
+	client_traffic_mutex.Lock()
+	defer client_traffic_mutex.Unlock()
+	
+	// Get or create client stats
+	clientStats, exists := client_traffic_stats[sourceIP]
+	if !exists {
+		clientStats = &ClientTrafficStats{
+			SourceIP:       sourceIP,
+			TrafficSamples: make([]TrafficSample, 0, 10),
+			LastUpdate:     time.Now(),
+		}
+		client_traffic_stats[sourceIP] = clientStats
+	}
+	
+	// Update totals
+	clientStats.BytesInTotal += bytesIn
+	clientStats.BytesOutTotal += bytesOut
+	clientStats.LastUpdate = time.Now()
+	
+	// Add traffic sample for speed calculation
+	now := time.Now()
+	clientStats.TrafficSamples = append(clientStats.TrafficSamples, TrafficSample{
+		Timestamp:    now,
+		TotalBytesIn: clientStats.BytesInTotal,
+		TotalBytesOut: clientStats.BytesOutTotal,
+	})
+	
+	// Keep only last 10 samples for performance
+	if len(clientStats.TrafficSamples) > 10 {
+		clientStats.TrafficSamples = clientStats.TrafficSamples[len(clientStats.TrafficSamples)-10:]
+	}
+	
+	// Calculate current speed based on last few samples
+	if len(clientStats.TrafficSamples) >= 2 {
+		latest := clientStats.TrafficSamples[len(clientStats.TrafficSamples)-1]
+		earliest := clientStats.TrafficSamples[0]
+		
+		timeDiff := latest.Timestamp.Sub(earliest.Timestamp).Seconds()
+		if timeDiff > 0 {
+			bytesInDiff := latest.TotalBytesIn - earliest.TotalBytesIn
+			bytesOutDiff := latest.TotalBytesOut - earliest.TotalBytesOut
+			
+			clientStats.BytesInPerSecond = int64(float64(bytesInDiff) / timeDiff)
+			clientStats.BytesOutPerSecond = int64(float64(bytesOutDiff) / timeDiff)
+		}
+	}
+}
+
+/*
+Update load balancer traffic statistics for real-time monitoring
+*/
+func updateLoadBalancerTrafficStats() {
+	mutex.Lock()
+	defer mutex.Unlock()
+	
+	for i := range lb_list {
+		lb := &lb_list[i]
+		
+		// Add traffic sample for speed calculation
+		now := time.Now()
+		
+		lb.traffic_mutex.Lock()
+		lb.traffic_samples = append(lb.traffic_samples, TrafficSample{
+			Timestamp:    now,
+			TotalBytesIn: lb.bytes_in_total,
+			TotalBytesOut: lb.bytes_out_total,
+		})
+		
+		// Keep only last 10 samples for performance
+		if len(lb.traffic_samples) > 10 {
+			lb.traffic_samples = lb.traffic_samples[len(lb.traffic_samples)-10:]
+		}
+		
+		// Calculate current speed based on last few samples
+		if len(lb.traffic_samples) >= 2 {
+			latest := lb.traffic_samples[len(lb.traffic_samples)-1]
+			earliest := lb.traffic_samples[0]
+			
+			timeDiff := latest.Timestamp.Sub(earliest.Timestamp).Seconds()
+			if timeDiff > 0 {
+				bytesInDiff := latest.TotalBytesIn - earliest.TotalBytesIn
+				bytesOutDiff := latest.TotalBytesOut - earliest.TotalBytesOut
+				
+				lb.bytes_in_per_second = int64(float64(bytesInDiff) / timeDiff)
+				lb.bytes_out_per_second = int64(float64(bytesOutDiff) / timeDiff)
+			}
+		}
+		lb.traffic_mutex.Unlock()
+	}
+}
+
+/*
+Get client traffic statistics for a specific source IP
+*/
+func getClientTrafficStats(sourceIP string) *ClientTrafficStats {
+	client_traffic_mutex.RLock()
+	defer client_traffic_mutex.RUnlock()
+	
+	if stats, exists := client_traffic_stats[sourceIP]; exists {
+		// Return a copy to avoid race conditions
+		statsCopy := *stats
+		return &statsCopy
+	}
+	
+	return &ClientTrafficStats{
+		SourceIP: sourceIP,
+		LastUpdate: time.Now(),
+	}
 }
 
 

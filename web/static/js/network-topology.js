@@ -276,18 +276,21 @@ class NetworkTopology {
     
     // Helper methods for real data processing
     calculateLBTraffic(lbStats, direction) {
-        // Estimate traffic based on connection count and success rate
-        const connections = lbStats.total_connections || 0;
-        const successRate = (lbStats.success_rate || 0) / 100;
-        const baseTraffic = connections * successRate * 1000; // rough estimate
-        return direction === 'in' ? baseTraffic * 0.8 : baseTraffic * 0.2; // 80/20 split
+        // Use real traffic data from load balancer statistics
+        if (direction === 'in') {
+            return lbStats.bytes_in_per_second || 0;
+        } else {
+            return lbStats.bytes_out_per_second || 0;
+        }
     }
     
     estimateClientTraffic(source, direction) {
-        // Estimate client traffic based on active connections
-        const activeConnections = source.active_connections || 0;
-        const baseTraffic = activeConnections * 50000; // 50KB per connection estimate
-        return direction === 'in' ? baseTraffic * 0.7 : baseTraffic * 0.3; // 70/30 split
+        // Use real traffic data from client statistics
+        if (direction === 'in') {
+            return source.bytes_in_per_second || 0;
+        } else {
+            return source.bytes_out_per_second || 0;
+        }
     }
     
     guessDeviceType(sourceIP) {

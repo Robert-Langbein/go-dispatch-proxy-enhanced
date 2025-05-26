@@ -53,6 +53,11 @@ type LoadBalancerWebInfo struct {
 	SuccessRate      float64                    `json:"success_rate"`
 	SourceIPRules    map[string]source_ip_rule  `json:"source_ip_rules"`
 	ActiveSources    map[string]int             `json:"active_sources"`
+	// Enhanced traffic statistics
+	BytesInTotal     int64                      `json:"bytes_in_total"`
+	BytesOutTotal    int64                      `json:"bytes_out_total"`
+	BytesInPerSecond int64                      `json:"bytes_in_per_second"`
+	BytesOutPerSecond int64                     `json:"bytes_out_per_second"`
 }
 
 type SourceIPInfo struct {
@@ -61,6 +66,11 @@ type SourceIPInfo struct {
 	ActiveConnections int   `json:"active_connections"`
 	AssignedLB       string `json:"assigned_lb"`
 	EffectiveRatio   int    `json:"effective_ratio"`
+	// Enhanced traffic statistics
+	BytesInTotal     int64  `json:"bytes_in_total"`
+	BytesOutTotal    int64  `json:"bytes_out_total"`
+	BytesInPerSecond int64  `json:"bytes_in_per_second"`
+	BytesOutPerSecond int64 `json:"bytes_out_per_second"`
 }
 
 type SystemInfo struct {
@@ -101,11 +111,7 @@ type GatewayWebInfo struct {
 }
 
 // Real-time traffic monitoring
-type TrafficSample struct {
-	timestamp    time.Time
-	totalBytesIn int64
-	totalBytesOut int64
-}
+// TrafficSample is now defined in main.go
 
 var (
 	trafficSamples       []TrafficSample
@@ -150,8 +156,15 @@ func init() {
 	trafficSamples = make([]TrafficSample, 0, 10) // Keep last 10 seconds
 	lastSampleTime = time.Now()
 	
-	// Start traffic monitoring goroutine
+	// Start traffic monitoring goroutines
 	go trafficMonitor()
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			updateLoadBalancerTrafficStats()
+		}
+	}()
 }
 
 // Traffic monitoring function
@@ -175,15 +188,15 @@ func updateTrafficSpeed() {
 	
 	// Add current sample
 	trafficSamples = append(trafficSamples, TrafficSample{
-		timestamp:     now,
-		totalBytesIn:  currentTotalIn,
-		totalBytesOut: currentTotalOut,
+		Timestamp:     now,
+		TotalBytesIn:  currentTotalIn,
+		TotalBytesOut: currentTotalOut,
 	})
 	
 	// Remove samples older than 5 seconds
 	cutoff := now.Add(-5 * time.Second)
 	for i := 0; i < len(trafficSamples); i++ {
-		if trafficSamples[i].timestamp.After(cutoff) {
+		if trafficSamples[i].Timestamp.After(cutoff) {
 			trafficSamples = trafficSamples[i:]
 			break
 		}
@@ -195,9 +208,9 @@ func updateTrafficSpeed() {
 		earliest := trafficSamples[0]
 		
 		// Calculate bytes per second over the sample period
-		timeDiff := latest.timestamp.Sub(earliest.timestamp).Seconds()
-		bytesInDiff := latest.totalBytesIn - earliest.totalBytesIn
-		bytesOutDiff := latest.totalBytesOut - earliest.totalBytesOut
+		timeDiff := latest.Timestamp.Sub(earliest.Timestamp).Seconds()
+		bytesInDiff := latest.TotalBytesIn - earliest.TotalBytesIn
+		bytesOutDiff := latest.TotalBytesOut - earliest.TotalBytesOut
 		
 		if timeDiff > 0 {
 			atomic.StoreInt64(&currentBytesInPerSecond, int64(float64(bytesInDiff)/timeDiff))
@@ -652,11 +665,11 @@ func (ws *WebServer) handleAPITrafficChart(w http.ResponseWriter, r *http.Reques
 			var chartData []map[string]interface{}
 			
 			for _, sample := range trafficSamples {
-				if sample.timestamp.After(cutoff) {
+				if sample.Timestamp.After(cutoff) {
 					chartData = append(chartData, map[string]interface{}{
-						"timestamp":     sample.timestamp.UnixMilli(),
-						"bytes_in":      sample.totalBytesIn,
-						"bytes_out":     sample.totalBytesOut,
+						"timestamp":     sample.Timestamp.UnixMilli(),
+						"bytes_in":      sample.TotalBytesIn,
+						"bytes_out":     sample.TotalBytesOut,
 						"bytes_in_speed":  getCurrentBytesInPerSecond(),
 						"bytes_out_speed": getCurrentBytesOutPerSecond(),
 					})
@@ -807,6 +820,10 @@ func (ws *WebServer) getDashboardData() DashboardData {
 				SuccessRate:      successRate,
 				SourceIPRules:    sourceIPRulesCopy,
 				ActiveSources:    activeSourcesCopy,
+				BytesInTotal:     lb.bytes_in_total,
+				BytesOutTotal:    lb.bytes_out_total,
+				BytesInPerSecond: lb.bytes_in_per_second,
+				BytesOutPerSecond: lb.bytes_out_per_second,
 			}
 			
 			totalConnections += lb.total_connections
@@ -815,9 +832,17 @@ func (ws *WebServer) getDashboardData() DashboardData {
 			
 			// Collect source IP information
 			for sourceIP, count := range activeSourcesCopy {
+				// Get client traffic stats
+				clientStats := getClientTrafficStats(sourceIP)
+				
 				if sourceInfo, exists := sourceMap[sourceIP]; exists {
 					sourceInfo.ActiveConnections += count
 					sourceInfo.TotalConnections += lb.total_connections
+					// Update with real traffic data
+					sourceInfo.BytesInTotal += clientStats.BytesInTotal
+					sourceInfo.BytesOutTotal += clientStats.BytesOutTotal
+					sourceInfo.BytesInPerSecond = clientStats.BytesInPerSecond
+					sourceInfo.BytesOutPerSecond = clientStats.BytesOutPerSecond
 				} else {
 					effectiveRatio := get_effective_contention_ratio(&lb, sourceIP)
 					sourceMap[sourceIP] = &SourceIPInfo{
@@ -826,6 +851,10 @@ func (ws *WebServer) getDashboardData() DashboardData {
 						ActiveConnections: count,
 						AssignedLB:        lb.address,
 						EffectiveRatio:    effectiveRatio,
+						BytesInTotal:     clientStats.BytesInTotal,
+						BytesOutTotal:    clientStats.BytesOutTotal,
+						BytesInPerSecond:  clientStats.BytesInPerSecond,
+						BytesOutPerSecond: clientStats.BytesOutPerSecond,
 					}
 				}
 			}
