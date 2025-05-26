@@ -282,6 +282,8 @@ func (ws *WebServer) Start() error {
 	http.HandleFunc("/api/interfaces", ws.handleAPIInterfaces)
 	http.HandleFunc("/api/lb/add", ws.handleAPIAddLB)
 	http.HandleFunc("/api/lb/remove", ws.handleAPIRemoveLB)
+	http.HandleFunc("/api/resolve-hostname", ws.handleAPIResolveHostname)
+	http.HandleFunc("/api/device-info", ws.handleAPIDeviceInfo)
 	// Removed - not needed with SQLite storage
 	// http.HandleFunc("/api/export", ws.handleAPIExport)
 	// http.HandleFunc("/api/import", ws.handleAPIImport)
@@ -1945,4 +1947,163 @@ func (ws *WebServer) handleNetwork(w http.ResponseWriter, r *http.Request) {
 	
 	// Serve network topology template
 	http.ServeFile(w, r, "web/templates/network.html")
+}
+
+/*
+Handle hostname resolution requests
+*/
+func (ws *WebServer) handleAPIResolveHostname(w http.ResponseWriter, r *http.Request) {
+	if !ws.isAuthenticated(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ip := r.URL.Query().Get("ip")
+	if ip == "" {
+		http.Error(w, "IP parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Try reverse DNS lookup
+	hostname := ws.resolveHostname(ip)
+	
+	response := map[string]interface{}{
+		"ip":       ip,
+		"hostname": hostname,
+		"success":  hostname != ip,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+/*
+Handle device information requests
+*/
+func (ws *WebServer) handleAPIDeviceInfo(w http.ResponseWriter, r *http.Request) {
+	if !ws.isAuthenticated(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ip := r.URL.Query().Get("ip")
+	if ip == "" {
+		http.Error(w, "IP parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Try to get device information from various sources
+	deviceInfo := ws.getDeviceInfo(ip)
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(deviceInfo)
+}
+
+/*
+Resolve hostname from IP address using reverse DNS
+*/
+func (ws *WebServer) resolveHostname(ip string) string {
+	// Try reverse DNS lookup
+	names, err := net.LookupAddr(ip)
+	if err == nil && len(names) > 0 {
+		// Return the first hostname found
+		hostname := names[0]
+		// Remove trailing dot if present
+		if strings.HasSuffix(hostname, ".") {
+			hostname = hostname[:len(hostname)-1]
+		}
+		return hostname
+	}
+	
+	// Return IP if no hostname found
+	return ip
+}
+
+/*
+Get device information from various sources
+*/
+func (ws *WebServer) getDeviceInfo(ip string) map[string]interface{} {
+	deviceInfo := map[string]interface{}{
+		"ip":         ip,
+		"name":       nil,
+		"type":       nil,
+		"vendor":     nil,
+		"os":         nil,
+		"user_agent": nil,
+		"hostname":   nil,
+	}
+	
+	// Try to get hostname
+	hostname := ws.resolveHostname(ip)
+	if hostname != ip {
+		deviceInfo["hostname"] = hostname
+		
+		// Try to guess device type from hostname
+		hostnameUpper := strings.ToUpper(hostname)
+		if strings.Contains(hostnameUpper, "IPHONE") {
+			deviceInfo["type"] = "iphone"
+			deviceInfo["name"] = "iPhone"
+			deviceInfo["vendor"] = "Apple"
+			deviceInfo["os"] = "iOS"
+		} else if strings.Contains(hostnameUpper, "IPAD") {
+			deviceInfo["type"] = "ipad"
+			deviceInfo["name"] = "iPad"
+			deviceInfo["vendor"] = "Apple"
+			deviceInfo["os"] = "iPadOS"
+		} else if strings.Contains(hostnameUpper, "MACBOOK") || strings.Contains(hostnameUpper, "IMAC") || strings.Contains(hostnameUpper, "MAC") {
+			deviceInfo["type"] = "macbook"
+			deviceInfo["name"] = "Mac"
+			deviceInfo["vendor"] = "Apple"
+			deviceInfo["os"] = "macOS"
+		} else if strings.Contains(hostnameUpper, "ANDROID") {
+			deviceInfo["type"] = "iphone" // Use iPhone icon for Android
+			deviceInfo["name"] = "Android Device"
+			deviceInfo["vendor"] = "Google"
+			deviceInfo["os"] = "Android"
+		} else if strings.Contains(hostnameUpper, "WINDOWS") || strings.Contains(hostnameUpper, "PC") {
+			deviceInfo["type"] = "macbook" // Use MacBook icon for Windows PC
+			deviceInfo["name"] = "Windows PC"
+			deviceInfo["vendor"] = "Microsoft"
+			deviceInfo["os"] = "Windows"
+		} else if strings.Contains(hostnameUpper, "SYNOLOGY") {
+			deviceInfo["type"] = "nas"
+			deviceInfo["name"] = "Synology NAS"
+			deviceInfo["vendor"] = "Synology"
+			deviceInfo["os"] = "DSM"
+		} else if strings.Contains(hostnameUpper, "QNAP") {
+			deviceInfo["type"] = "nas"
+			deviceInfo["name"] = "QNAP NAS"
+			deviceInfo["vendor"] = "QNAP"
+			deviceInfo["os"] = "QTS"
+		} else if strings.Contains(hostnameUpper, "CHROMECAST") || strings.Contains(hostnameUpper, "GOOGLETV") {
+			deviceInfo["type"] = "chromecast"
+			deviceInfo["name"] = "Chromecast"
+			deviceInfo["vendor"] = "Google"
+			deviceInfo["os"] = "Android TV"
+		} else if strings.Contains(hostnameUpper, "UNIFI") || strings.Contains(hostnameUpper, "UBIQUITI") || strings.Contains(hostnameUpper, "AP") {
+			deviceInfo["type"] = "accesspoint"
+			deviceInfo["name"] = "Access Point"
+			deviceInfo["vendor"] = "Ubiquiti"
+			deviceInfo["os"] = "UniFi"
+		}
+	}
+	
+	// TODO: Add more device detection methods here:
+	// - ARP table parsing for MAC address vendor lookup
+	// - DHCP lease information
+	// - NetBIOS name resolution
+	// - Bonjour/mDNS service discovery
+	// - SNMP queries for managed devices
+	
+	return deviceInfo
 }

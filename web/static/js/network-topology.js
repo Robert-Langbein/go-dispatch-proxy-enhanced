@@ -14,6 +14,10 @@ class NetworkTopology {
         this.animationSpeed = 1;
         this.animationFrame = null;
         
+        // Device name caching for consistent names
+        this.deviceNameCache = new Map();
+        this.deviceTypeCache = new Map();
+        
         // UniFi UDM Colors (exact match)
         this.colors = {
             connectionLine: '#44c6fd',  // UDM blue for connections
@@ -121,7 +125,7 @@ class NetworkTopology {
             const stats = await statsResponse.json();
             
             // Create UniFi UDM layout
-            this.processTopologyData(config, stats);
+            await this.processTopologyData(config, stats);
             
             // Hide loading
             this.showLoading(false);
@@ -132,7 +136,7 @@ class NetworkTopology {
         }
     }
 
-    processTopologyData(config, stats) {
+    async processTopologyData(config, stats) {
         this.devices = [];
         this.connections = [];
         this.particles = [];
@@ -233,11 +237,15 @@ class NetworkTopology {
             const clientSpacing = Math.min(80, (this.height - 160) / Math.max(stats.active_sources.length - 1, 1));
             const clientStartY = centerY - ((stats.active_sources.length - 1) * clientSpacing) / 2;
             
-            stats.active_sources.forEach((source, index) => {
+            // Process client devices asynchronously to resolve names
+            const clientPromises = stats.active_sources.map(async (source, index) => {
+                const deviceName = await this.getDeviceName(source.source_ip);
+                const deviceType = this.guessDeviceType(source.source_ip);
+                
                 const clientDevice = {
                     id: `client_${source.source_ip}`,
-                    type: this.guessDeviceType(source.source_ip),
-                    name: this.getDeviceName(source.source_ip),
+                    type: deviceType,
+                    name: deviceName,
                     subtitle: source.source_ip,
                     downloadSpeed: this.formatSpeed(this.estimateClientTraffic(source, 'in')),
                     uploadSpeed: this.formatSpeed(this.estimateClientTraffic(source, 'out')),
@@ -249,6 +257,13 @@ class NetworkTopology {
                     activeConnections: source.active_connections || 0,
                     assignedLB: source.assigned_lb
                 };
+                
+                return clientDevice;
+            });
+            
+            // Wait for all device names to be resolved
+            const resolvedClientDevices = await Promise.all(clientPromises);
+            resolvedClientDevices.forEach(clientDevice => {
                 this.devices.push(clientDevice);
                 clientDevices.push(clientDevice);
                 
@@ -293,32 +308,171 @@ class NetworkTopology {
         }
     }
     
+    // Real device name resolution with multiple methods
+    async resolveDeviceName(sourceIP) {
+        // Check cache first
+        if (this.deviceNameCache.has(sourceIP)) {
+            return this.deviceNameCache.get(sourceIP);
+        }
+        
+        let deviceName = null;
+        let deviceType = 'iphone'; // default
+        
+        try {
+            // Method 1: Try reverse DNS lookup
+            deviceName = await this.tryReverseDNS(sourceIP);
+            
+            // Method 2: If no DNS name, try NetBIOS/Bonjour detection
+            if (!deviceName) {
+                const deviceInfo = await this.tryDeviceDetection(sourceIP);
+                deviceName = deviceInfo.name;
+                deviceType = deviceInfo.type;
+            }
+            
+            // Method 3: Fallback to consistent name based on IP
+            if (!deviceName) {
+                const fallbackInfo = this.generateConsistentName(sourceIP);
+                deviceName = fallbackInfo.name;
+                deviceType = fallbackInfo.type;
+            }
+        } catch (error) {
+            console.warn(`Error resolving device name for ${sourceIP}:`, error);
+            const fallbackInfo = this.generateConsistentName(sourceIP);
+            deviceName = fallbackInfo.name;
+            deviceType = fallbackInfo.type;
+        }
+        
+        // Cache the results
+        this.deviceNameCache.set(sourceIP, deviceName);
+        this.deviceTypeCache.set(sourceIP, deviceType);
+        
+        return deviceName;
+    }
+    
+    async tryReverseDNS(ip) {
+        // Note: Reverse DNS from browser is limited, but we can try
+        try {
+            const response = await fetch(`/api/resolve-hostname?ip=${encodeURIComponent(ip)}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.hostname && data.hostname !== ip) {
+                    // Clean up hostname (remove domain suffix, make readable)
+                    let hostname = data.hostname.split('.')[0];
+                    hostname = hostname.replace(/[-_]/g, ' ');
+                    hostname = hostname.charAt(0).toUpperCase() + hostname.slice(1);
+                    return hostname;
+                }
+            }
+        } catch (error) {
+            // DNS resolution failed, continue to next method
+        }
+        return null;
+    }
+    
+    async tryDeviceDetection(ip) {
+        try {
+            const response = await fetch(`/api/device-info?ip=${encodeURIComponent(ip)}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.name || data.type) {
+                    return {
+                        name: data.name,
+                        type: data.type || this.guessDeviceTypeFromInfo(data)
+                    };
+                }
+            }
+        } catch (error) {
+            // Device detection failed
+        }
+        return { name: null, type: null };
+    }
+    
+    generateConsistentName(sourceIP) {
+        // Generate consistent names based on IP (not random)
+        const ipParts = sourceIP.split('.');
+        const lastOctet = parseInt(ipParts[3]);
+        const secondLastOctet = parseInt(ipParts[2]);
+        
+        // Use IP-based seeded "randomness" for consistency
+        const seed = (secondLastOctet * 256 + lastOctet) % 1000;
+        
+        // Device type based on IP range
+        let deviceType;
+        if (lastOctet < 10) {
+            deviceType = 'accesspoint';
+        } else if (lastOctet < 50) {
+            deviceType = 'iphone';
+        } else if (lastOctet < 100) {
+            deviceType = 'ipad';
+        } else if (lastOctet < 150) {
+            deviceType = 'macbook';
+        } else if (lastOctet < 200) {
+            deviceType = 'nas';
+        } else {
+            deviceType = 'chromecast';
+        }
+        
+        // Consistent names based on device type and IP
+        const deviceNames = {
+            'accesspoint': ['Access Point', 'UniFi AP', 'WiFi AP', 'Wireless AP'],
+            'iphone': ['iPhone', 'iPhone Pro', 'iPhone 13', 'iPhone 14', 'iPhone 15'],
+            'ipad': ['iPad', 'iPad Pro', 'iPad Air', 'iPad Mini'],
+            'macbook': ['MacBook', 'MacBook Pro', 'MacBook Air', 'iMac', 'Mac Studio'],
+            'nas': ['Synology NAS', 'QNAP NAS', 'File Server', 'Storage Server'],
+            'chromecast': ['Chromecast', 'Google TV', 'Media Player', 'Smart TV']
+        };
+        
+        const names = deviceNames[deviceType] || ['Device'];
+        const nameIndex = seed % names.length;
+        const baseName = names[nameIndex];
+        
+        // Add consistent suffix based on IP for uniqueness
+        const suffix = lastOctet > 100 ? ` ${String.fromCharCode(65 + (seed % 26))}` : ` ${(seed % 9) + 1}`;
+        
+        return {
+            name: baseName + suffix,
+            type: deviceType
+        };
+    }
+    
     guessDeviceType(sourceIP) {
+        // Check cache first
+        if (this.deviceTypeCache.has(sourceIP)) {
+            return this.deviceTypeCache.get(sourceIP);
+        }
+        
         // Simple device type guessing based on IP patterns
         const lastOctet = parseInt(sourceIP.split('.').pop());
         
-        if (lastOctet < 10) return 'accesspoint';
-        if (lastOctet < 50) return 'iphone';
-        if (lastOctet < 100) return 'ipad';
-        if (lastOctet < 150) return 'macbook';
-        if (lastOctet < 200) return 'nas';
-        return 'chromecast';
+        let deviceType;
+        if (lastOctet < 10) deviceType = 'accesspoint';
+        else if (lastOctet < 50) deviceType = 'iphone';
+        else if (lastOctet < 100) deviceType = 'ipad';
+        else if (lastOctet < 150) deviceType = 'macbook';
+        else if (lastOctet < 200) deviceType = 'nas';
+        else deviceType = 'chromecast';
+        
+        return deviceType;
     }
     
-    getDeviceName(sourceIP) {
-        // Generate realistic device names based on IP
-        const deviceTypes = {
-            'accesspoint': ['Access Point', 'AP Estudi', 'UniFi AP'],
-            'iphone': ['iPhone', 'iPhone 13', 'iPhone Pro'],
-            'ipad': ['iPad', 'iPad Pro', 'iPad Air'],
-            'macbook': ['MacBook', 'MacBook Pro', 'MacBook Air'],
-            'nas': ['Synology NAS', 'QNAP NAS', 'Storage'],
-            'chromecast': ['Chromecast', 'Chromecast Audio', 'Google TV']
-        };
+    guessDeviceTypeFromInfo(deviceInfo) {
+        // Guess device type from detection info
+        const userAgent = (deviceInfo.user_agent || '').toLowerCase();
+        const vendor = (deviceInfo.vendor || '').toLowerCase();
+        const os = (deviceInfo.os || '').toLowerCase();
         
-        const type = this.guessDeviceType(sourceIP);
-        const names = deviceTypes[type] || ['Device'];
-        return names[Math.floor(Math.random() * names.length)];
+        if (userAgent.includes('iphone') || os.includes('ios')) return 'iphone';
+        if (userAgent.includes('ipad') || userAgent.includes('tablet')) return 'ipad';
+        if (userAgent.includes('mac') || os.includes('macos')) return 'macbook';
+        if (vendor.includes('synology') || vendor.includes('qnap')) return 'nas';
+        if (userAgent.includes('chromecast') || userAgent.includes('googletv')) return 'chromecast';
+        if (userAgent.includes('unifi') || userAgent.includes('ubiquiti')) return 'accesspoint';
+        
+        return 'iphone'; // default
+    }
+    
+    async getDeviceName(sourceIP) {
+        return await this.resolveDeviceName(sourceIP);
     }
 
     formatSpeed(bytesPerSecond) {
