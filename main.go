@@ -67,6 +67,25 @@ type traffic_stats struct {
 	LastUpdate        time.Time `json:"last_update"`
 }
 
+// Traffic sample for real-time monitoring
+type TrafficSample struct {
+	Timestamp    time.Time `json:"timestamp"`
+	TotalBytesIn int64     `json:"total_bytes_in"`
+	TotalBytesOut int64    `json:"total_bytes_out"`
+}
+
+// Client traffic tracking
+type ClientTrafficStats struct {
+	SourceIP         string          `json:"source_ip"`
+	BytesInTotal     int64           `json:"bytes_in_total"`
+	BytesOutTotal    int64           `json:"bytes_out_total"`
+	BytesInPerSecond int64           `json:"bytes_in_per_second"`
+	BytesOutPerSecond int64          `json:"bytes_out_per_second"`
+	TrafficSamples   []TrafficSample `json:"-"` // Don't expose in JSON
+	LastUpdate       time.Time       `json:"last_update"`
+	TrafficMutex     sync.RWMutex    `json:"-"` // Don't expose in JSON
+}
+
 type enhanced_load_balancer struct {
 	address             string
 	iface               string
@@ -84,6 +103,14 @@ type enhanced_load_balancer struct {
 	traffic_stats       traffic_stats              // current traffic statistics
 	bytes_transferred   int64                      // total bytes transferred
 	last_traffic_update time.Time                  // last traffic update timestamp
+	
+	// Enhanced per-LB traffic tracking
+	bytes_in_total      int64                      // total bytes received through this LB
+	bytes_out_total     int64                      // total bytes sent through this LB
+	bytes_in_per_second int64                      // current bytes/sec in through this LB
+	bytes_out_per_second int64                     // current bytes/sec out through this LB
+	traffic_samples     []TrafficSample            // recent traffic samples for this LB
+	traffic_mutex       sync.RWMutex               // mutex for traffic samples
 }
 
 // The load balancer used in the previous connection (global round robin)
@@ -103,6 +130,7 @@ var config_file string = "source_ip_rules.json"
 
 // Global debug flag
 var debug_mode bool = false
+var quiet_mode bool = false
 
 // Real-time connection tracking
 var active_connections map[string]*active_connection
@@ -117,6 +145,10 @@ var global_start_time time.Time
 
 // Performance counters
 var total_data_transferred int64
+
+// Global client traffic tracking
+var client_traffic_stats map[string]*ClientTrafficStats
+var client_traffic_mutex sync.RWMutex
 
 // Connection timeout and limits
 const (
@@ -140,6 +172,9 @@ func init() {
 	connection_mutex = &sync.RWMutex{}
 	connection_history = make([]active_connection, 0, max_connections)
 	global_start_time = time.Now()
+	
+	// Initialize client traffic tracking
+	client_traffic_stats = make(map[string]*ClientTrafficStats)
 }
 
 /*
@@ -417,9 +452,14 @@ func update_connection_traffic(conn_id string, bytes_in, bytes_out int64) {
 		if lb_index := conn.LBIndex; lb_index >= 0 && lb_index < len(lb_list) {
 			mutex.Lock()
 			lb_list[lb_index].bytes_transferred += bytes_in + bytes_out
+			lb_list[lb_index].bytes_in_total += bytes_in
+			lb_list[lb_index].bytes_out_total += bytes_out
 			lb_list[lb_index].last_traffic_update = time.Now()
-	mutex.Unlock()
+			mutex.Unlock()
 		}
+		
+		// Update client traffic stats
+		updateClientTrafficStats(conn.SourceIP, bytes_in, bytes_out)
 	}
 }
 
@@ -852,123 +892,113 @@ func parse_load_balancers(args []string, tunnel bool) {
 Main function
 */
 func main() {
-	var lhost = flag.String("lhost", "127.0.0.1", "The host to listen for SOCKS connection")
-	var lport = flag.Int("lport", 8080, "The local port to listen for SOCKS connection")
-	var detect = flag.Bool("list", false, "Shows the available addresses for dispatching (non-tunnelling mode only)")
-	var tunnel = flag.Bool("tunnel", false, "Use tunnelling mode (acts as a transparent load balancing proxy)")
-	var quiet = flag.Bool("quiet", false, "disable logs")
-	var stats = flag.Bool("stats", false, "Show load balancer statistics and exit")
-	var configFile = flag.String("config", "source_ip_rules.json", "Configuration file for source IP rules")
-	var webPort = flag.Int("web", 0, "Enable web GUI on specified port (0 = disabled, 80 = recommended)")
-	var debug = flag.Bool("debug", false, "Enable detailed debug logging")
-	
-	// Gateway mode flags
-	var gatewayMode = flag.Bool("gateway", false, "Enable gateway mode (acts as default gateway with load balancing)")
-	var gatewayIP = flag.String("gateway-ip", "192.168.100.1", "Gateway IP address for gateway mode")
-	var subnetCIDR = flag.String("subnet", "192.168.100.0/24", "Subnet CIDR for gateway mode")
-	var transparentPort = flag.Int("transparent-port", 8888, "Transparent proxy port for gateway mode")
-	var dnsPort = flag.Int("dns-port", 5353, "DNS server port for gateway mode")
-	var natInterface = flag.String("nat-interface", "", "Network interface for NAT (auto-detect if empty)")
-	var autoConfig = flag.Bool("auto-config", true, "Automatically configure iptables rules for gateway mode")
-	var dhcpStart = flag.String("dhcp-start", "192.168.100.10", "DHCP range start for gateway mode")
-	var dhcpEnd = flag.String("dhcp-end", "192.168.100.100", "DHCP range end for gateway mode")
-
+	// Only webgui flag for initial setup - all settings managed via database
+	var webPort = flag.Int("webgui", 8090, "Web GUI port for initial setup (saved to database on first run)")
 	flag.Parse()
-	
-	// Set custom config file path
-	config_file = *configFile
-	
-	// Initialize gateway configuration
+
+	log.Printf("[INFO] Go Dispatch Proxy Enhanced v3.0 - Database Edition")
+	log.Printf("[INFO] Starting with default settings - configuration via WebUI")
+
+	// Initialize database first
+	if err := initDatabase(); err != nil {
+		log.Fatalf("[FATAL] Database initialization failed: %v", err)
+	}
+	defer closeDatabase()
+
+	// Initialize webPort from command line flag if this is first startup
+	if err := initializeWebPortFromFlag(*webPort); err != nil {
+		log.Fatalf("[FATAL] Failed to initialize webPort from flag: %v", err)
+	}
+
+	// Load all configuration from database (webPort is now stored there)
+	if err := syncSettingsFromDatabase(); err != nil {
+		log.Fatalf("[FATAL] Failed to load settings from database: %v", err)
+	}
+
+	if err := syncGatewayConfigFromDatabase(); err != nil {
+		log.Fatalf("[FATAL] Failed to load gateway config from database: %v", err)
+	}
+
+	// Apply loaded settings to global variables
+	debug_mode = currentSettings.DebugMode
+	quiet_mode = currentSettings.QuietMode
+	config_file = currentSettings.ConfigFile
+
+	// Initialize gateway configuration from database
 	gateway_cfg = gateway_config{
-		enabled:           *gatewayMode,
-		transparent_port:  *transparentPort,
-		dns_port:         *dnsPort,
-		gateway_ip:       *gatewayIP,
-		subnet_cidr:      *subnetCIDR,
-		nat_interface:    *natInterface,
-		auto_configure:   *autoConfig,
-		dhcp_range_start: *dhcpStart,
-		dhcp_range_end:   *dhcpEnd,
+		enabled:           currentSettings.GatewayMode,
+		transparent_port:  currentSettings.TransparentPort,
+		dns_port:         currentSettings.DNSPort,
+		gateway_ip:       currentSettings.GatewayIP,
+		subnet_cidr:      currentSettings.SubnetCIDR,
+		nat_interface:    currentSettings.NATInterface,
+		auto_configure:   currentSettings.AutoConfig,
+		dhcp_range_start: currentSettings.DHCPStart,
+		dhcp_range_end:   currentSettings.DHCPEnd,
 		backup_rules_file: "iptables_backup.rules",
 		iptables_rules:   make([]string, 0),
 	}
+
+	mutex = &sync.Mutex{}
 	
-	if *detect {
-		detect_interfaces()
-		return
-	}
-	
-	if *stats {
-		//Parse remaining string to get addresses of load balancers for stats
-		parse_load_balancers(flag.Args(), *tunnel)
-		load_source_ip_rules()
-		get_load_balancer_stats()
-		return
+	// Load load balancers from database
+	if err := loadLoadBalancersFromDatabase(); err != nil {
+		log.Printf("[WARN] Failed to load load balancers from database: %v", err)
 	}
 
-	// Enable debug logging if requested
-	if *debug {
-		debug_mode = true
-		log.Printf("[DEBUG] Debug mode enabled")
+	// Disable timestamp in log messages if quiet mode
+	if quiet_mode {
+		log.SetOutput(io.Discard)
+	} else {
+		log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
 	}
 
-	// Disable timestamp in log messages
-	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
-
-	// Check for valid IP
-	if net.ParseIP(*lhost).To4() == nil {
-		log.Fatal("[FATAL] Invalid host ", *lhost)
+	// Enable debug logging if configured
+	if debug_mode {
+		log.Printf("[DEBUG] Debug mode enabled from database settings")
 	}
 
-	// Check for valid port
-	if *lport < 1 || *lport > 65535 {
-		log.Fatal("[FATAL] Invalid port ", *lport)
-	}
-
-	//Parse remaining string to get addresses of load balancers
-	parse_load_balancers(flag.Args(), *tunnel)
-
-	// Load source IP rules configuration
-	load_source_ip_rules()
-	
 	// Initialize gateway mode if enabled
 	if gateway_cfg.enabled {
 		if err := initialize_gateway_mode(); err != nil {
-			log.Fatalf("[FATAL] Failed to initialize gateway mode: %v", err)
+			log.Printf("[ERROR] Failed to initialize gateway mode: %v", err)
+			// Don't exit, just log the error
 		}
 	}
 
-	// Initialize web server settings
-	InitializeSettings(*lhost, *lport, *webPort, *configFile, *tunnel, *debug, *quiet, *gatewayMode, *gatewayIP, *subnetCIDR, *transparentPort, *dnsPort, *natInterface, *autoConfig, *dhcpStart, *dhcpEnd)
+	// Initialize web server settings (no longer needs all the parameters)
+	InitializeSettingsFromDatabase()
 	
-	// Start web server if enabled
-	if *webPort > 0 {
-		log.Printf("[INFO] Starting web server on port %d", *webPort)
-		startWebServer(*webPort)
+	// Start web server (always enabled by default now)
+	if currentSettings.WebPort > 0 {
+		log.Printf("[INFO] Starting web server on port %d", currentSettings.WebPort)
+		startWebServer(currentSettings.WebPort)
 	}
 
-	local_bind_address := fmt.Sprintf("%s:%d", *lhost, *lport)
+	local_bind_address := fmt.Sprintf("%s:%d", currentSettings.ListenHost, currentSettings.ListenPort)
 
 	// Start local server
 	l, err := net.Listen("tcp4", local_bind_address)
 	if err != nil {
-		log.Fatalln("[FATAL] Could not start local server on ", local_bind_address)
+		log.Fatalf("[FATAL] Could not start local server on %s: %v", local_bind_address, err)
 	}
-	log.Println("[INFO] Enhanced SOCKS5 proxy with source IP load balancing started on ", local_bind_address)
-	log.Printf("[INFO] Load balancing %d interfaces with enhanced features", len(lb_list))
 	
-	// Print enhanced load balancer information
+	log.Printf("[INFO] Enhanced SOCKS5 proxy started on %s", local_bind_address)
+	log.Printf("[INFO] Web GUI available at http://localhost:%d", currentSettings.WebPort)
+	log.Printf("[INFO] Load balancing %d interfaces", len(lb_list))
+	
+	// Print load balancer information
 	for i, lb := range lb_list {
 		custom_rules := len(lb.source_ip_rules)
 		status := "enabled"
 		if !lb.enabled {
 			status = "disabled"
 		}
-		log.Printf("[INFO] LB %d: %s (%s) - Default ratio: %d, Custom rules: %d, Status: %s", 
+		log.Printf("[INFO] LB %d: %s (%s) - Ratio: %d, Rules: %d, Status: %s", 
 			i+1, lb.address, lb.iface, lb.contention_ratio, custom_rules, status)
 	}
 	
-	if *debug {
+	if debug_mode {
 		log.Printf("[DEBUG] Available network interfaces:")
 		detect_interfaces()
 	}
@@ -976,20 +1006,21 @@ func main() {
 	defer l.Close()
 	defer stopWebServer()
 	defer cleanup_gateway_mode()
-
-	if (*quiet) {
-		log.SetOutput(io.Discard)
-	}
-
-	mutex = &sync.Mutex{}
 	
-	// Start cleanup goroutine for old connections
+	// Start periodic database sync and cleanup
 	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
+		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
+				// Save statistics snapshot
+				if err := saveStatisticsSnapshot(); err != nil {
+					log.Printf("[WARN] Failed to save statistics: %v", err)
+				}
+				// Sync load balancers to database
+				syncLoadBalancersToDatabase()
+				// Cleanup old connections
 				cleanup_old_connections()
 			}
 		}
@@ -1019,7 +1050,7 @@ func main() {
 		if err != nil {
 			log.Println("[WARN] Could not accept connection")
 		} else {
-			go handle_connection(conn, *tunnel)
+			go handle_connection(conn, currentSettings.TunnelMode)
 		}
 	}
 }
@@ -1547,6 +1578,120 @@ func cleanup_gateway_mode() error {
 	exec.Command("iptables", "-t", "mangle", "-X", "DISPATCH_PROXY").Run()
 	
 	return nil
+}
+
+/*
+Update client traffic statistics for real-time monitoring
+*/
+func updateClientTrafficStats(sourceIP string, bytesIn, bytesOut int64) {
+	client_traffic_mutex.Lock()
+	defer client_traffic_mutex.Unlock()
+	
+	// Get or create client stats
+	clientStats, exists := client_traffic_stats[sourceIP]
+	if !exists {
+		clientStats = &ClientTrafficStats{
+			SourceIP:       sourceIP,
+			TrafficSamples: make([]TrafficSample, 0, 10),
+			LastUpdate:     time.Now(),
+		}
+		client_traffic_stats[sourceIP] = clientStats
+	}
+	
+	// Update totals
+	clientStats.BytesInTotal += bytesIn
+	clientStats.BytesOutTotal += bytesOut
+	clientStats.LastUpdate = time.Now()
+	
+	// Add traffic sample for speed calculation
+	now := time.Now()
+	clientStats.TrafficSamples = append(clientStats.TrafficSamples, TrafficSample{
+		Timestamp:    now,
+		TotalBytesIn: clientStats.BytesInTotal,
+		TotalBytesOut: clientStats.BytesOutTotal,
+	})
+	
+	// Keep only last 10 samples for performance
+	if len(clientStats.TrafficSamples) > 10 {
+		clientStats.TrafficSamples = clientStats.TrafficSamples[len(clientStats.TrafficSamples)-10:]
+	}
+	
+	// Calculate current speed based on last few samples
+	if len(clientStats.TrafficSamples) >= 2 {
+		latest := clientStats.TrafficSamples[len(clientStats.TrafficSamples)-1]
+		earliest := clientStats.TrafficSamples[0]
+		
+		timeDiff := latest.Timestamp.Sub(earliest.Timestamp).Seconds()
+		if timeDiff > 0 {
+			bytesInDiff := latest.TotalBytesIn - earliest.TotalBytesIn
+			bytesOutDiff := latest.TotalBytesOut - earliest.TotalBytesOut
+			
+			clientStats.BytesInPerSecond = int64(float64(bytesInDiff) / timeDiff)
+			clientStats.BytesOutPerSecond = int64(float64(bytesOutDiff) / timeDiff)
+		}
+	}
+}
+
+/*
+Update load balancer traffic statistics for real-time monitoring
+*/
+func updateLoadBalancerTrafficStats() {
+	mutex.Lock()
+	defer mutex.Unlock()
+	
+	for i := range lb_list {
+		lb := &lb_list[i]
+		
+		// Add traffic sample for speed calculation
+		now := time.Now()
+		
+		lb.traffic_mutex.Lock()
+		lb.traffic_samples = append(lb.traffic_samples, TrafficSample{
+			Timestamp:    now,
+			TotalBytesIn: lb.bytes_in_total,
+			TotalBytesOut: lb.bytes_out_total,
+		})
+		
+		// Keep only last 10 samples for performance
+		if len(lb.traffic_samples) > 10 {
+			lb.traffic_samples = lb.traffic_samples[len(lb.traffic_samples)-10:]
+		}
+		
+		// Calculate current speed based on last few samples
+		if len(lb.traffic_samples) >= 2 {
+			latest := lb.traffic_samples[len(lb.traffic_samples)-1]
+			earliest := lb.traffic_samples[0]
+			
+			timeDiff := latest.Timestamp.Sub(earliest.Timestamp).Seconds()
+			if timeDiff > 0 {
+				bytesInDiff := latest.TotalBytesIn - earliest.TotalBytesIn
+				bytesOutDiff := latest.TotalBytesOut - earliest.TotalBytesOut
+				
+				lb.bytes_in_per_second = int64(float64(bytesInDiff) / timeDiff)
+				lb.bytes_out_per_second = int64(float64(bytesOutDiff) / timeDiff)
+			}
+		}
+		lb.traffic_mutex.Unlock()
+	}
+}
+
+/*
+Get client traffic statistics for a specific source IP
+*/
+func getClientTrafficStats(sourceIP string) *ClientTrafficStats {
+	client_traffic_mutex.RLock()
+	defer client_traffic_mutex.RUnlock()
+	
+	if stats, exists := client_traffic_stats[sourceIP]; exists {
+		// Return a copy to avoid race conditions
+		statsCopy := *stats
+		return &statsCopy
+	}
+	
+	return &ClientTrafficStats{
+		SourceIP: sourceIP,
+		LastUpdate: time.Now(),
+	}
 }
 
 

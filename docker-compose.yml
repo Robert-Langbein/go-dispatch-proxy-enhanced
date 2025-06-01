@@ -1,7 +1,25 @@
 services:
   dispatch-proxy:
-    build: .
-    container_name: dispatch-proxy
-    network_mode: host        # Host-Namespace
-    cap_add: [ NET_RAW ]      # nötig für SO_BINDTODEVICE
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: go-dispatch-proxy-enhanced
+    # Use host networking for full network access
+    network_mode: host
+    # Run as root for Gateway mode (iptables, routing, etc.)
+    # user: "1001:1001"  # Disabled for Gateway mode - requires root
+    # Volumes for persistent data
+    volumes:
+      # - /mnt/user/docker-data/dispatch-proxy/data:/app/data              # Database and config persistence
+      # - /mnt/user/docker-data/dispatch-proxy/logs:/app/logs              # Log files (if needed)
+      # - /mnt/user/docker-data/dispatch-proxy/web:/app/web
+      - /etc/localtime:/etc/localtime:ro  # Sync container time with host
+    # Required capabilities for network operations
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+      - SYS_ADMIN  # Additional capability for Gateway mode
+    # Privileged mode for full network control (Gateway mode)
+    privileged: true
+    # Restart policy
     restart: unless-stopped

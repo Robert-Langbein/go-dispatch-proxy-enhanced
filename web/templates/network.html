@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Dispatch Proxy Enhanced - Network Topology</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <link rel="stylesheet" href="/static/css/network.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- UniFi Style Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="header-logo">
+                    <span class="logo-text">DPE</span>
+                </div>
+                <nav class="header-nav">
+                    <a href="/" class="nav-item">Dashboard</a>
+                    <a href="/network" class="nav-item active">Network</a>
+                    <a href="#" class="nav-item">Devices</a>
+                    <a href="/settings" class="nav-item">Settings</a>
+                </nav>
+            </div>
+            <div class="header-right">
+                <div class="header-actions">
+                    <button class="header-btn" onclick="refreshTopology()" title="Refresh">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button class="header-btn" onclick="toggleAutoRefresh()" title="Auto Refresh" id="autoRefreshBtn">
+                        <i class="fas fa-play"></i>
+                    </button>
+                    <div class="header-user">
+                        <i class="fas fa-user-circle"></i>
+                        <span>admin</span>
+                    </div>
+                    <a href="/logout" class="header-btn logout-btn" title="Logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Network Topology Header -->
+            <section class="topology-header">
+                <div class="topology-title">
+                    <h1>
+                        <i class="fas fa-project-diagram"></i>
+                        Network Topology
+                    </h1>
+                    <p class="topology-subtitle">Real-time visualization of network traffic and load balancing</p>
+                </div>
+            </section>
+
+            <!-- Real-time Traffic Grid - Dashboard Style -->
+            <section class="traffic-grid">
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Download Speed</h4>
+                    <div class="traffic-card-value" id="downloadSpeed">0 B/s</div>
+                    <p class="traffic-card-unit speed-bits" id="downloadSpeedBits">0 bit/s</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Upload Speed</h4>
+                    <div class="traffic-card-value" id="uploadSpeed">0 B/s</div>
+                    <p class="traffic-card-unit speed-bits" id="uploadSpeedBits">0 bit/s</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Active Connections</h4>
+                    <div class="traffic-card-value" id="activeConnections">0</div>
+                    <p class="traffic-card-unit">Current sessions</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Load Balancers</h4>
+                    <div class="traffic-card-value" id="loadBalancers">0</div>
+                    <p class="traffic-card-unit">Active interfaces</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Unique Clients</h4>
+                    <div class="traffic-card-value" id="uniqueClients">0</div>
+                    <p class="traffic-card-unit">Connected devices</p>
+                </div>
+                
+                <div class="traffic-card">
+                    <h4 class="traffic-card-title">Total Throughput</h4>
+                    <div class="traffic-card-value" id="totalThroughput">0 B/s</div>
+                    <p class="traffic-card-unit">Combined traffic</p>
+                </div>
+            </section>
+
+            <!-- Topology Visualization Container -->
+            <section class="topology-container">
+                <div class="topology-canvas" id="networkTopology">
+                    <!-- D3.js visualization will be rendered here -->
+                    <div class="topology-loading">
+                        <div class="loading-spinner">
+                            <i class="fas fa-spinner fa-spin"></i>
+                        </div>
+                        <p>Loading network topology...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Device Details Panel -->
+            <div id="deviceDetailsPanel" class="device-details-panel">
+                <div class="panel-header">
+                    <h3 id="deviceTitle">Device Details</h3>
+                    <button class="panel-close" onclick="closeDevicePanel()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="panel-content" id="deviceContent">
+                    <!-- Device details will be populated here -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/network-topology.js"></script>
+</body>
+</html> 

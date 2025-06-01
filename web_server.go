@@ -53,6 +53,11 @@ type LoadBalancerWebInfo struct {
 	SuccessRate      float64                    `json:"success_rate"`
 	SourceIPRules    map[string]source_ip_rule  `json:"source_ip_rules"`
 	ActiveSources    map[string]int             `json:"active_sources"`
+	// Enhanced traffic statistics
+	BytesInTotal     int64                      `json:"bytes_in_total"`
+	BytesOutTotal    int64                      `json:"bytes_out_total"`
+	BytesInPerSecond int64                      `json:"bytes_in_per_second"`
+	BytesOutPerSecond int64                     `json:"bytes_out_per_second"`
 }
 
 type SourceIPInfo struct {
@@ -61,6 +66,11 @@ type SourceIPInfo struct {
 	ActiveConnections int   `json:"active_connections"`
 	AssignedLB       string `json:"assigned_lb"`
 	EffectiveRatio   int    `json:"effective_ratio"`
+	// Enhanced traffic statistics
+	BytesInTotal     int64  `json:"bytes_in_total"`
+	BytesOutTotal    int64  `json:"bytes_out_total"`
+	BytesInPerSecond int64  `json:"bytes_in_per_second"`
+	BytesOutPerSecond int64 `json:"bytes_out_per_second"`
 }
 
 type SystemInfo struct {
@@ -101,11 +111,7 @@ type GatewayWebInfo struct {
 }
 
 // Real-time traffic monitoring
-type TrafficSample struct {
-	timestamp    time.Time
-	totalBytesIn int64
-	totalBytesOut int64
-}
+// TrafficSample is now defined in main.go
 
 var (
 	trafficSamples       []TrafficSample
@@ -150,8 +156,15 @@ func init() {
 	trafficSamples = make([]TrafficSample, 0, 10) // Keep last 10 seconds
 	lastSampleTime = time.Now()
 	
-	// Start traffic monitoring goroutine
+	// Start traffic monitoring goroutines
 	go trafficMonitor()
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			updateLoadBalancerTrafficStats()
+		}
+	}()
 }
 
 // Traffic monitoring function
@@ -175,15 +188,15 @@ func updateTrafficSpeed() {
 	
 	// Add current sample
 	trafficSamples = append(trafficSamples, TrafficSample{
-		timestamp:     now,
-		totalBytesIn:  currentTotalIn,
-		totalBytesOut: currentTotalOut,
+		Timestamp:     now,
+		TotalBytesIn:  currentTotalIn,
+		TotalBytesOut: currentTotalOut,
 	})
 	
 	// Remove samples older than 5 seconds
 	cutoff := now.Add(-5 * time.Second)
 	for i := 0; i < len(trafficSamples); i++ {
-		if trafficSamples[i].timestamp.After(cutoff) {
+		if trafficSamples[i].Timestamp.After(cutoff) {
 			trafficSamples = trafficSamples[i:]
 			break
 		}
@@ -195,9 +208,9 @@ func updateTrafficSpeed() {
 		earliest := trafficSamples[0]
 		
 		// Calculate bytes per second over the sample period
-		timeDiff := latest.timestamp.Sub(earliest.timestamp).Seconds()
-		bytesInDiff := latest.totalBytesIn - earliest.totalBytesIn
-		bytesOutDiff := latest.totalBytesOut - earliest.totalBytesOut
+		timeDiff := latest.Timestamp.Sub(earliest.Timestamp).Seconds()
+		bytesInDiff := latest.TotalBytesIn - earliest.TotalBytesIn
+		bytesOutDiff := latest.TotalBytesOut - earliest.TotalBytesOut
 		
 		if timeDiff > 0 {
 			atomic.StoreInt64(&currentBytesInPerSecond, int64(float64(bytesInDiff)/timeDiff))
@@ -269,11 +282,15 @@ func (ws *WebServer) Start() error {
 	http.HandleFunc("/api/interfaces", ws.handleAPIInterfaces)
 	http.HandleFunc("/api/lb/add", ws.handleAPIAddLB)
 	http.HandleFunc("/api/lb/remove", ws.handleAPIRemoveLB)
-	http.HandleFunc("/api/export", ws.handleAPIExport)
-	http.HandleFunc("/api/import", ws.handleAPIImport)
+	http.HandleFunc("/api/resolve-hostname", ws.handleAPIResolveHostname)
+	http.HandleFunc("/api/device-info", ws.handleAPIDeviceInfo)
+	// Removed - not needed with SQLite storage
+	// http.HandleFunc("/api/export", ws.handleAPIExport)
+	// http.HandleFunc("/api/import", ws.handleAPIImport)
 	http.HandleFunc("/api/reset", ws.handleAPIReset)
 	http.HandleFunc("/api/restart", ws.handleAPIRestart)
 	http.HandleFunc("/settings", ws.handleSettings)
+	http.HandleFunc("/network", ws.handleNetwork)
 	http.HandleFunc("/static/", ws.handleStatic)
 	
 	log.Printf("[INFO] Web GUI started on http://0.0.0.0%s", ws.server.Addr)
@@ -650,11 +667,11 @@ func (ws *WebServer) handleAPITrafficChart(w http.ResponseWriter, r *http.Reques
 			var chartData []map[string]interface{}
 			
 			for _, sample := range trafficSamples {
-				if sample.timestamp.After(cutoff) {
+				if sample.Timestamp.After(cutoff) {
 					chartData = append(chartData, map[string]interface{}{
-						"timestamp":     sample.timestamp.UnixMilli(),
-						"bytes_in":      sample.totalBytesIn,
-						"bytes_out":     sample.totalBytesOut,
+						"timestamp":     sample.Timestamp.UnixMilli(),
+						"bytes_in":      sample.TotalBytesIn,
+						"bytes_out":     sample.TotalBytesOut,
 						"bytes_in_speed":  getCurrentBytesInPerSecond(),
 						"bytes_out_speed": getCurrentBytesOutPerSecond(),
 					})
@@ -805,6 +822,10 @@ func (ws *WebServer) getDashboardData() DashboardData {
 				SuccessRate:      successRate,
 				SourceIPRules:    sourceIPRulesCopy,
 				ActiveSources:    activeSourcesCopy,
+				BytesInTotal:     lb.bytes_in_total,
+				BytesOutTotal:    lb.bytes_out_total,
+				BytesInPerSecond: lb.bytes_in_per_second,
+				BytesOutPerSecond: lb.bytes_out_per_second,
 			}
 			
 			totalConnections += lb.total_connections
@@ -813,9 +834,17 @@ func (ws *WebServer) getDashboardData() DashboardData {
 			
 			// Collect source IP information
 			for sourceIP, count := range activeSourcesCopy {
+				// Get client traffic stats
+				clientStats := getClientTrafficStats(sourceIP)
+				
 				if sourceInfo, exists := sourceMap[sourceIP]; exists {
 					sourceInfo.ActiveConnections += count
 					sourceInfo.TotalConnections += lb.total_connections
+					// Update with real traffic data
+					sourceInfo.BytesInTotal += clientStats.BytesInTotal
+					sourceInfo.BytesOutTotal += clientStats.BytesOutTotal
+					sourceInfo.BytesInPerSecond = clientStats.BytesInPerSecond
+					sourceInfo.BytesOutPerSecond = clientStats.BytesOutPerSecond
 				} else {
 					effectiveRatio := get_effective_contention_ratio(&lb, sourceIP)
 					sourceMap[sourceIP] = &SourceIPInfo{
@@ -824,6 +853,10 @@ func (ws *WebServer) getDashboardData() DashboardData {
 						ActiveConnections: count,
 						AssignedLB:        lb.address,
 						EffectiveRatio:    effectiveRatio,
+						BytesInTotal:     clientStats.BytesInTotal,
+						BytesOutTotal:    clientStats.BytesOutTotal,
+						BytesInPerSecond:  clientStats.BytesInPerSecond,
+						BytesOutPerSecond: clientStats.BytesOutPerSecond,
 					}
 				}
 			}
@@ -1025,74 +1058,25 @@ func startWebServer(port int) {
 }
 
 /*
-Update command line arguments with current settings
+Database-first restart - all configuration comes from database
 */
-func updateArgsWithCurrentSettings(args []string) []string {
-	newArgs := []string{}
-	
-	// Build new arguments based on current settings
-	newArgs = append(newArgs, "-lhost", currentSettings.ListenHost)
-	newArgs = append(newArgs, "-lport", strconv.Itoa(currentSettings.ListenPort))
-	
-	if currentSettings.WebPort > 0 {
-		newArgs = append(newArgs, "-webgui", strconv.Itoa(currentSettings.WebPort))
+func restartWithDatabaseConfig() error {
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot get executable path: %v", err)
 	}
 	
-	if currentSettings.ConfigFile != "" {
-		newArgs = append(newArgs, "-config", currentSettings.ConfigFile)
+	// No command line arguments needed - everything comes from database
+	args := []string{executable}
+	
+	log.Printf("[INFO] Restarting with database configuration: %s", executable)
+	
+	// Execute the new process without any flags
+	if err := syscall.Exec(executable, args, os.Environ()); err != nil {
+		return fmt.Errorf("failed to restart: %v", err)
 	}
 	
-	if currentSettings.TunnelMode {
-		newArgs = append(newArgs, "-tunnel")
-	}
-	
-	if currentSettings.DebugMode {
-		newArgs = append(newArgs, "-debug")
-	}
-	
-	if currentSettings.QuietMode {
-		newArgs = append(newArgs, "-quiet")
-	}
-	
-	if currentSettings.GatewayMode {
-		newArgs = append(newArgs, "-gateway")
-		newArgs = append(newArgs, "-gateway-ip", currentSettings.GatewayIP)
-		newArgs = append(newArgs, "-subnet-cidr", currentSettings.SubnetCIDR)
-		
-		if currentSettings.TransparentPort > 0 {
-			newArgs = append(newArgs, "-transparent-port", strconv.Itoa(currentSettings.TransparentPort))
-		}
-		
-		if currentSettings.DNSPort > 0 {
-			newArgs = append(newArgs, "-dns-port", strconv.Itoa(currentSettings.DNSPort))
-		}
-		
-		if currentSettings.NATInterface != "" {
-			newArgs = append(newArgs, "-nat-interface", currentSettings.NATInterface)
-		}
-		
-		if !currentSettings.AutoConfig {
-			newArgs = append(newArgs, "-no-auto-config")
-		}
-		
-		if currentSettings.DHCPStart != "" {
-			newArgs = append(newArgs, "-dhcp-start", currentSettings.DHCPStart)
-		}
-		
-		if currentSettings.DHCPEnd != "" {
-			newArgs = append(newArgs, "-dhcp-end", currentSettings.DHCPEnd)
-		}
-	}
-	
-	// Add any load balancer arguments from original args
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-lb" && i+1 < len(args) {
-			newArgs = append(newArgs, "-lb", args[i+1])
-			i++ // Skip the next argument as it's the value
-		}
-	}
-	
-	return newArgs
+	return nil
 }
 
 /*
@@ -1185,8 +1169,6 @@ func (ws *WebServer) handleAPIGatewayToggle(w http.ResponseWriter, r *http.Reque
 	}
 	json.NewEncoder(w).Encode(response)
 }
-
-
 
 /*
 Handle Gateway Configuration API endpoint
@@ -1375,7 +1357,6 @@ func (ws *WebServer) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			"listen_host":      currentSettings.ListenHost,
 			"listen_port":      currentSettings.ListenPort,
 			"web_port":         currentSettings.WebPort,
-			"config_file":      currentSettings.ConfigFile,
 			"tunnel_mode":      currentSettings.TunnelMode,
 			"debug_mode":       currentSettings.DebugMode,
 			"quiet_mode":       currentSettings.QuietMode,
@@ -1464,7 +1445,7 @@ func (ws *WebServer) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			updated = append(updated, "dhcp_end")
 		}
 
-		// Settings that require restart - but still save them
+		// Settings that require restart - but still save them to database
 		if listenHost, ok := newSettings["listen_host"].(string); ok && listenHost != "" {
 			currentSettings.ListenHost = listenHost
 			requires_restart = append(requires_restart, "listen_host")
@@ -1485,10 +1466,36 @@ func (ws *WebServer) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			requires_restart = append(requires_restart, "tunnel_mode")
 			updated = append(updated, "tunnel_mode")
 		}
-		if configFile, ok := newSettings["config_file"].(string); ok && configFile != "" {
-			currentSettings.ConfigFile = configFile
-			requires_restart = append(requires_restart, "config_file")
-			updated = append(updated, "config_file")
+
+
+		// Save all settings to database
+		dbSettings := DBSettings{
+			ListenHost:  currentSettings.ListenHost,
+			ListenPort:  currentSettings.ListenPort,
+			WebPort:     currentSettings.WebPort,
+			ConfigFile:  "deprecated", // Keep for DB compatibility
+			TunnelMode:  currentSettings.TunnelMode,
+			DebugMode:   currentSettings.DebugMode,
+			QuietMode:   currentSettings.QuietMode,
+		}
+		if err := saveSettings(dbSettings); err != nil {
+			log.Printf("[ERROR] Failed to save settings to database: %v", err)
+		}
+
+		// Save gateway config to database
+		dbGatewayConfig := DBGatewayConfig{
+			Enabled:         currentSettings.GatewayMode,
+			GatewayIP:       currentSettings.GatewayIP,
+			SubnetCIDR:      currentSettings.SubnetCIDR,
+			TransparentPort: currentSettings.TransparentPort,
+			DNSPort:         currentSettings.DNSPort,
+			NATInterface:    currentSettings.NATInterface,
+			AutoConfigure:   currentSettings.AutoConfig,
+			DHCPRangeStart:  currentSettings.DHCPStart,
+			DHCPRangeEnd:    currentSettings.DHCPEnd,
+		}
+		if err := saveGatewayConfig(dbGatewayConfig); err != nil {
+			log.Printf("[ERROR] Failed to save gateway config to database: %v", err)
 		}
 
 		// Create detailed message
@@ -1524,7 +1531,7 @@ func (ws *WebServer) handleAPIInterfaces(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	
 	if r.Method == "GET" {
-		// Get available network interfaces
+		// Get available network interfaces (all interfaces, filtering is done client-side)
 		interfaces := []map[string]interface{}{}
 		
 		ifaces, err := net.Interfaces()
@@ -1534,26 +1541,35 @@ func (ws *WebServer) handleAPIInterfaces(w http.ResponseWriter, r *http.Request)
 		}
 
 		for _, iface := range ifaces {
-			if (iface.Flags&net.FlagUp == net.FlagUp) && (iface.Flags&net.FlagLoopback != net.FlagLoopback) {
-				addrs, _ := iface.Addrs()
-				var ipAddr string
-				for _, addr := range addrs {
-					if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-						if ipnet.IP.To4() != nil {
-							ipAddr = ipnet.IP.String()
-							break
-						}
+			// Skip only loopback interfaces, include all others (up/down, with/without IP)
+			if (iface.Flags&net.FlagLoopback == net.FlagLoopback) {
+				continue
+			}
+			
+			addrs, _ := iface.Addrs()
+			var ipAddr string
+			var hasIPv4 bool
+			
+			// Get IPv4 address if available
+			for _, addr := range addrs {
+				if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+					if ipnet.IP.To4() != nil {
+						ipAddr = ipnet.IP.String()
+						hasIPv4 = true
+						break
 					}
 				}
-				
-				interfaceInfo := map[string]interface{}{
-					"name":  iface.Name,
-					"ip":    ipAddr,
-					"up":    (iface.Flags & net.FlagUp) != 0,
-					"mtu":   iface.MTU,
-				}
-				interfaces = append(interfaces, interfaceInfo)
 			}
+			
+			interfaceInfo := map[string]interface{}{
+				"name":     iface.Name,
+				"ip":       ipAddr,
+				"has_ip":   hasIPv4,
+				"up":       (iface.Flags & net.FlagUp) != 0,
+				"mtu":      iface.MTU,
+				"flags":    iface.Flags.String(),
+			}
+			interfaces = append(interfaces, interfaceInfo)
 		}
 		
 		json.NewEncoder(w).Encode(interfaces)
@@ -1618,6 +1634,24 @@ func (ws *WebServer) handleAPIAddLB(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Save to database first
+	dbLB := DBLoadBalancer{
+		Address:         request.Address,
+		Interface:       request.Interface,
+		ContentionRatio: request.ContentionRatio,
+		Enabled:         true,
+	}
+	
+	if err := saveLoadBalancer(dbLB); err != nil {
+		mutex.Unlock()
+		response := map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to save load balancer to database: %v", err),
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
 	// Add new load balancer to the list
 	newLB := enhanced_load_balancer{
 		address:             request.Address,
@@ -1678,6 +1712,16 @@ func (ws *WebServer) handleAPIRemoveLB(w http.ResponseWriter, r *http.Request) {
 
 	for i, lb := range lb_list {
 		if lb.address == request.Address {
+			// Remove from database first
+			if err := deleteLoadBalancer(request.Address); err != nil {
+				response := map[string]interface{}{
+					"success": false,
+					"error":   fmt.Sprintf("Failed to delete from database: %v", err),
+				}
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+			
 			// Remove from slice
 			lb_list = append(lb_list[:i], lb_list[i+1:]...)
 			
@@ -1861,25 +1905,205 @@ func (ws *WebServer) handleAPIRestart(w http.ResponseWriter, r *http.Request) {
 			webServer.Stop()
 		}
 		
-		// Restart with current executable and preserved args
-		executable, err := os.Executable()
-		if err != nil {
-			log.Printf("[ERROR] Cannot get executable path: %v", err)
-			os.Exit(1)
-		}
-		
-		// Get current process arguments (excluding the executable name)
-		args := os.Args[1:]
-		
-		// Update arguments with new settings
-		args = updateArgsWithCurrentSettings(args)
-		
-		log.Printf("[INFO] Restarting with: %s %v", executable, args)
-		
-		// Execute the new process
-		if err := syscall.Exec(executable, append([]string{executable}, args...), os.Environ()); err != nil {
+		// Restart with database configuration (no flags needed)
+		if err := restartWithDatabaseConfig(); err != nil {
 			log.Printf("[ERROR] Failed to restart: %v", err)
 			os.Exit(1)
 		}
 	}()
+}
+
+/*
+Handle network topology page
+*/
+func (ws *WebServer) handleNetwork(w http.ResponseWriter, r *http.Request) {
+	// Check authentication first
+	sessionID, err := r.Cookie("session")
+	if err != nil || sessionID == nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	ws.sessionMutex.RLock()
+	sessionTime, exists := ws.sessions[sessionID.Value]
+	ws.sessionMutex.RUnlock()
+
+	if !exists || time.Since(sessionTime) > 24*time.Hour {
+		// Session expired or doesn't exist
+		ws.sessionMutex.Lock()
+		delete(ws.sessions, sessionID.Value)
+		ws.sessionMutex.Unlock()
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	// Update session timestamp
+	ws.sessionMutex.Lock()
+	ws.sessions[sessionID.Value] = time.Now()
+	ws.sessionMutex.Unlock()
+
+	// Set content type
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	
+	// Serve network topology template
+	http.ServeFile(w, r, "web/templates/network.html")
+}
+
+/*
+Handle hostname resolution requests
+*/
+func (ws *WebServer) handleAPIResolveHostname(w http.ResponseWriter, r *http.Request) {
+	if !ws.isAuthenticated(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ip := r.URL.Query().Get("ip")
+	if ip == "" {
+		http.Error(w, "IP parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Try reverse DNS lookup
+	hostname := ws.resolveHostname(ip)
+	
+	response := map[string]interface{}{
+		"ip":       ip,
+		"hostname": hostname,
+		"success":  hostname != ip,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+/*
+Handle device information requests
+*/
+func (ws *WebServer) handleAPIDeviceInfo(w http.ResponseWriter, r *http.Request) {
+	if !ws.isAuthenticated(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ip := r.URL.Query().Get("ip")
+	if ip == "" {
+		http.Error(w, "IP parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Try to get device information from various sources
+	deviceInfo := ws.getDeviceInfo(ip)
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(deviceInfo)
+}
+
+/*
+Resolve hostname from IP address using reverse DNS
+*/
+func (ws *WebServer) resolveHostname(ip string) string {
+	// Try reverse DNS lookup
+	names, err := net.LookupAddr(ip)
+	if err == nil && len(names) > 0 {
+		// Return the first hostname found
+		hostname := names[0]
+		// Remove trailing dot if present
+		if strings.HasSuffix(hostname, ".") {
+			hostname = hostname[:len(hostname)-1]
+		}
+		return hostname
+	}
+	
+	// Return IP if no hostname found
+	return ip
+}
+
+/*
+Get device information from various sources
+*/
+func (ws *WebServer) getDeviceInfo(ip string) map[string]interface{} {
+	deviceInfo := map[string]interface{}{
+		"ip":         ip,
+		"name":       nil,
+		"type":       nil,
+		"vendor":     nil,
+		"os":         nil,
+		"user_agent": nil,
+		"hostname":   nil,
+	}
+	
+	// Try to get hostname
+	hostname := ws.resolveHostname(ip)
+	if hostname != ip {
+		deviceInfo["hostname"] = hostname
+		
+		// Try to guess device type from hostname
+		hostnameUpper := strings.ToUpper(hostname)
+		if strings.Contains(hostnameUpper, "IPHONE") {
+			deviceInfo["type"] = "iphone"
+			deviceInfo["name"] = "iPhone"
+			deviceInfo["vendor"] = "Apple"
+			deviceInfo["os"] = "iOS"
+		} else if strings.Contains(hostnameUpper, "IPAD") {
+			deviceInfo["type"] = "ipad"
+			deviceInfo["name"] = "iPad"
+			deviceInfo["vendor"] = "Apple"
+			deviceInfo["os"] = "iPadOS"
+		} else if strings.Contains(hostnameUpper, "MACBOOK") || strings.Contains(hostnameUpper, "IMAC") || strings.Contains(hostnameUpper, "MAC") {
+			deviceInfo["type"] = "macbook"
+			deviceInfo["name"] = "Mac"
+			deviceInfo["vendor"] = "Apple"
+			deviceInfo["os"] = "macOS"
+		} else if strings.Contains(hostnameUpper, "ANDROID") {
+			deviceInfo["type"] = "iphone" // Use iPhone icon for Android
+			deviceInfo["name"] = "Android Device"
+			deviceInfo["vendor"] = "Google"
+			deviceInfo["os"] = "Android"
+		} else if strings.Contains(hostnameUpper, "WINDOWS") || strings.Contains(hostnameUpper, "PC") {
+			deviceInfo["type"] = "macbook" // Use MacBook icon for Windows PC
+			deviceInfo["name"] = "Windows PC"
+			deviceInfo["vendor"] = "Microsoft"
+			deviceInfo["os"] = "Windows"
+		} else if strings.Contains(hostnameUpper, "SYNOLOGY") {
+			deviceInfo["type"] = "nas"
+			deviceInfo["name"] = "Synology NAS"
+			deviceInfo["vendor"] = "Synology"
+			deviceInfo["os"] = "DSM"
+		} else if strings.Contains(hostnameUpper, "QNAP") {
+			deviceInfo["type"] = "nas"
+			deviceInfo["name"] = "QNAP NAS"
+			deviceInfo["vendor"] = "QNAP"
+			deviceInfo["os"] = "QTS"
+		} else if strings.Contains(hostnameUpper, "CHROMECAST") || strings.Contains(hostnameUpper, "GOOGLETV") {
+			deviceInfo["type"] = "chromecast"
+			deviceInfo["name"] = "Chromecast"
+			deviceInfo["vendor"] = "Google"
+			deviceInfo["os"] = "Android TV"
+		} else if strings.Contains(hostnameUpper, "UNIFI") || strings.Contains(hostnameUpper, "UBIQUITI") || strings.Contains(hostnameUpper, "AP") {
+			deviceInfo["type"] = "accesspoint"
+			deviceInfo["name"] = "Access Point"
+			deviceInfo["vendor"] = "Ubiquiti"
+			deviceInfo["os"] = "UniFi"
+		}
+	}
+	
+	// TODO: Add more device detection methods here:
+	// - ARP table parsing for MAC address vendor lookup
+	// - DHCP lease information
+	// - NetBIOS name resolution
+	// - Bonjour/mDNS service discovery
+	// - SNMP queries for managed devices
+	
+	return deviceInfo
 }

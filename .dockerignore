@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Build artifacts
+go-dispatch-proxy-enhanced
+go-dispatch-proxy
+*.exe
+
+# Logs
+*.log
+debug.log
+logs/
+
+# Database files (will be mounted as volume)
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Test files
+*_test.go
+test/
+coverage.out
+
+# Documentation
+*.md
+docs/
+
+# Configuration examples
+*.example.*
+
+# Temporary files
+tmp/
+temp/ 

@@ -4,6 +4,7 @@ class SettingsManager {
         this.currentSettings = {};
         this.availableInterfaces = [];
         this.activeLoadBalancers = [];
+        this.interfaceFilter = 'with_ip'; // 'all' or 'with_ip'
         this.init();
     }
 
@@ -78,7 +79,6 @@ class SettingsManager {
             'lhost': this.currentSettings.listen_host || '127.0.0.1',
             'lport': this.currentSettings.listen_port || 8080,
             'webPort': this.currentSettings.web_port || 0,
-            'configFile': this.currentSettings.config_file || 'source_ip_rules.json',
             'tunnel': this.currentSettings.tunnel_mode || false,
             'debug': this.currentSettings.debug_mode || false
         };
@@ -107,6 +107,7 @@ class SettingsManager {
             if (response.ok) {
                 this.availableInterfaces = await response.json();
                 this.renderInterfaces();
+                this.updateFilterInfo();
             } else {
                 throw new Error('Failed to scan interfaces');
             }
@@ -119,35 +120,103 @@ class SettingsManager {
     // Render available interfaces
     renderInterfaces() {
         const container = document.getElementById('availableInterfaces');
-        if (!container || !this.availableInterfaces.length) {
+        if (!container) return;
+        
+        if (!this.availableInterfaces.length) {
             container.innerHTML = '<div class="error-message"><i class="fas fa-info-circle"></i>No network interfaces found</div>';
             return;
         }
 
-        const interfacesHTML = this.availableInterfaces.map(iface => `
+        // Filter interfaces based on current filter
+        const filteredInterfaces = this.getFilteredInterfaces();
+        
+        if (!filteredInterfaces.length) {
+            const filterText = this.interfaceFilter === 'all' ? 'interfaces' : 'interfaces with IP addresses';
+            container.innerHTML = `<div class="error-message"><i class="fas fa-info-circle"></i>No ${filterText} found</div>`;
+            return;
+        }
+
+        const interfacesHTML = filteredInterfaces.map(iface => `
             <div class="interface-card" data-interface="${iface.name}">
                 <div class="interface-card-header">
                     <div class="interface-name">
                         <i class="fas fa-network-wired"></i>
                         ${iface.name}
+                        <span class="interface-flags" style="font-size: 12px; color: #666; margin-left: 8px;">${iface.flags || ''}</span>
                     </div>
                     <div class="status-indicator ${iface.up ? '' : 'inactive'}"></div>
                 </div>
-                <div class="interface-ip">${iface.ip || 'No IP assigned'}</div>
+                <div class="interface-ip">${iface.ip || '<span style="color: #999; font-style: italic;">No IP configured</span>'}</div>
                 <div class="interface-status">
                     <span>${iface.up ? 'Active' : 'Inactive'}</span>
-                    ${iface.speed ? `• ${iface.speed}` : ''}
+                    <span style="margin-left: 8px;">MTU: ${iface.mtu || 'N/A'}</span>
                 </div>
+                ${iface.has_ip ? `
                 <div style="margin-top: 12px;">
                     <button class="btn btn-primary btn-sm" onclick="settingsManager.addInterfaceAsLB('${iface.name}', '${iface.ip}')">
                         <i class="fas fa-plus"></i>
                         Add as Load Balancer
                     </button>
                 </div>
+                ` : `
+                <div style="margin-top: 12px;">
+                    <button class="btn btn-secondary btn-sm" disabled title="Interface has no IP address">
+                        <i class="fas fa-ban"></i>
+                        Cannot Add
+                    </button>
+                </div>
+                `}
             </div>
         `).join('');
 
         container.innerHTML = interfacesHTML;
+    }
+
+    // Get filtered interfaces based on current filter
+    getFilteredInterfaces() {
+        if (this.interfaceFilter === 'with_ip') {
+            return this.availableInterfaces.filter(iface => iface.has_ip);
+        }
+        return this.availableInterfaces; // 'all'
+    }
+
+    // Filter interfaces by type
+    filterInterfaces(filterType) {
+        this.interfaceFilter = filterType;
+        
+        // Update button states
+        document.querySelectorAll('.filter-buttons button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
+        if (filterType === 'all') {
+            document.getElementById('filterAll').classList.add('active');
+        } else if (filterType === 'with_ip') {
+            document.getElementById('filterWithIP').classList.add('active');
+        }
+        
+        // Re-render interfaces with new filter
+        this.renderInterfaces();
+        this.updateFilterInfo();
+    }
+
+    // Update filter information text
+    updateFilterInfo() {
+        const filterInfo = document.getElementById('filterInfo');
+        if (!filterInfo) return;
+        
+        const totalInterfaces = this.availableInterfaces.length;
+        const withIPInterfaces = this.availableInterfaces.filter(iface => iface.has_ip).length;
+        const filteredInterfaces = this.getFilteredInterfaces().length;
+        
+        let infoText = '';
+        if (this.interfaceFilter === 'all') {
+            infoText = `Showing all ${totalInterfaces} network interfaces (${withIPInterfaces} with IP addresses)`;
+        } else if (this.interfaceFilter === 'with_ip') {
+            infoText = `Showing ${filteredInterfaces} interfaces with IP addresses (${totalInterfaces} total)`;
+        }
+        
+        filterInfo.textContent = infoText;
     }
 
     // Add interface as load balancer
@@ -388,7 +457,6 @@ class SettingsManager {
             listen_host: document.getElementById('lhost')?.value || '127.0.0.1',
             listen_port: parseInt(document.getElementById('lport')?.value) || 8080,
             web_port: parseInt(document.getElementById('webPort')?.value) || 0,
-            config_file: document.getElementById('configFile')?.value || 'source_ip_rules.json',
             tunnel_mode: document.getElementById('tunnel')?.checked || false,
             debug_mode: document.getElementById('debug')?.checked || false,
             
@@ -454,91 +522,7 @@ class SettingsManager {
         }
     }
 
-    // Export configuration
-    async exportConfig() {
-        try {
-            const response = await fetch('/api/export');
-            if (response.ok) {
-                const config = await response.json();
-                const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `dispatch-proxy-config-${new Date().toISOString().split('T')[0]}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                
-                this.showNotification('Configuration exported successfully', 'success');
-            } else {
-                throw new Error('Failed to export configuration');
-            }
-        } catch (error) {
-            console.error('Failed to export config:', error);
-            this.showNotification('Failed to export configuration', 'error');
-        }
-    }
 
-    // Import configuration
-    importConfig() {
-        this.showModal('importModal');
-    }
-
-    // Process import configuration
-    async processImportConfig() {
-        const fileInput = document.getElementById('configUpload');
-        const textInput = document.getElementById('configText');
-        
-        let configData = null;
-        
-        if (fileInput.files[0]) {
-            // Read from file
-            const file = fileInput.files[0];
-            const text = await file.text();
-            try {
-                configData = JSON.parse(text);
-            } catch (error) {
-                this.showNotification('Invalid JSON file', 'error');
-                return;
-            }
-        } else if (textInput.value.trim()) {
-            // Read from textarea
-            try {
-                configData = JSON.parse(textInput.value.trim());
-            } catch (error) {
-                this.showNotification('Invalid JSON format', 'error');
-                return;
-            }
-        } else {
-            this.showNotification('Please select a file or paste configuration', 'error');
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/import', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(configData)
-            });
-
-            if (response.ok) {
-                this.showNotification('Configuration imported successfully', 'success');
-                this.closeModal('importModal');
-                this.refreshSettings();
-                
-                // Clear form
-                fileInput.value = '';
-                textInput.value = '';
-            } else {
-                throw new Error('Failed to import configuration');
-            }
-        } catch (error) {
-            console.error('Failed to import config:', error);
-            this.showNotification('Failed to import configuration', 'error');
-        }
-    }
 
     // Reset to defaults
     async resetToDefaults() {
@@ -806,6 +790,10 @@ function scanInterfaces() {
     settingsManager.scanInterfaces();
 }
 
+function filterInterfaces(filterType) {
+    settingsManager.filterInterfaces(filterType);
+}
+
 function addCustomLoadBalancer() {
     settingsManager.addCustomLoadBalancer();
 }
@@ -818,17 +806,7 @@ function toggleGatewayMode(enabled) {
     settingsManager.toggleGatewayMode(enabled);
 }
 
-function exportConfig() {
-    settingsManager.exportConfig();
-}
 
-function importConfig() {
-    settingsManager.importConfig();
-}
-
-function processImportConfig() {
-    settingsManager.processImportConfig();
-}
 
 function resetToDefaults() {
     settingsManager.resetToDefaults();

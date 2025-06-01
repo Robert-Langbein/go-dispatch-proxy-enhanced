@@ -19,7 +19,7 @@
                 </div>
                 <nav class="header-nav">
                     <a href="/" class="nav-item">Dashboard</a>
-                    <a href="#" class="nav-item">Network</a>
+                    <a href="/network" class="nav-item">Network</a>
                     <a href="#" class="nav-item">Devices</a>
                     <a href="/settings" class="nav-item active">Settings</a>
                 </nav>
@@ -136,23 +136,7 @@
                         </div>
                     </div>
 
-                    <!-- Configuration File -->
-                    <div class="settings-card">
-                        <div class="settings-card-header">
-                            <h3 class="settings-card-title">
-                                <i class="fas fa-file-alt"></i>
-                                Configuration
-                            </h3>
-                        </div>
-                        <div class="settings-card-body">
-                            <div class="form-group">
-                                <label for="configFile">Config File Path</label>
-                                <input type="text" id="configFile" value="{{.Settings.ConfigFile}}" 
-                                       placeholder="source_ip_rules.json" class="form-control">
-                                <small class="form-text">Path to source IP rules configuration</small>
-                            </div>
-                        </div>
-                    </div>
+
                 </div>
 
                 <!-- Save Button for General Settings -->
@@ -185,12 +169,31 @@
                             <i class="fas fa-search"></i>
                             Available Network Interfaces
                         </h3>
-                        <button class="btn btn-secondary" onclick="scanInterfaces()">
-                            <i class="fas fa-sync-alt"></i>
-                            Scan Interfaces
-                        </button>
+                        <div class="header-actions">
+                            <button class="btn btn-secondary" onclick="scanInterfaces()">
+                                <i class="fas fa-sync-alt"></i>
+                                Scan Interfaces
+                            </button>
+                        </div>
                     </div>
                     <div class="settings-card-body">
+                        <!-- Interface Filter Controls -->
+                        <div class="interface-filters" style="margin-bottom: 16px;">
+                            <div class="filter-buttons">
+                                <button class="btn btn-outline-primary" id="filterAll" onclick="filterInterfaces('all')">
+                                    <i class="fas fa-list"></i>
+                                    All Interfaces
+                                </button>
+                                <button class="btn btn-outline-primary active" id="filterWithIP" onclick="filterInterfaces('with_ip')">
+                                    <i class="fas fa-network-wired"></i>
+                                    With IP Address
+                                </button>
+                            </div>
+                            <div class="filter-info" id="filterInfo" style="margin-top: 8px; font-size: 14px; color: #666;">
+                                Showing interfaces with IP addresses
+                            </div>
+                        </div>
+                        
                         <div class="interfaces-grid" id="availableInterfaces">
                             <div class="loading">
                                 <i class="fas fa-spinner fa-spin"></i>
@@ -384,14 +387,6 @@
                         </div>
                         <div class="settings-card-body">
                             <div class="action-buttons">
-                                <button class="btn btn-secondary" onclick="exportConfig()">
-                                    <i class="fas fa-download"></i>
-                                    Export Configuration
-                                </button>
-                                <button class="btn btn-secondary" onclick="importConfig()">
-                                    <i class="fas fa-upload"></i>
-                                    Import Configuration
-                                </button>
                                 <button class="btn btn-warning" onclick="resetToDefaults()">
                                     <i class="fas fa-undo"></i>
                                     Reset to Defaults
@@ -439,29 +434,7 @@
         </div>
     </div>
 
-    <!-- Import Config Modal -->
-    <div id="importModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Import Configuration</h2>
-                <span class="modal-close" onclick="closeModal('importModal')">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="configUpload">Select configuration file</label>
-                    <input type="file" id="configUpload" accept=".json" class="form-control">
-                </div>
-                <div class="form-group">
-                    <label for="configText">Or paste configuration JSON</label>
-                    <textarea id="configText" rows="10" class="form-control" placeholder="Paste configuration JSON here..."></textarea>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeModal('importModal')">Cancel</button>
-                <button class="btn btn-primary" onclick="processImportConfig()">Import</button>
-            </div>
-        </div>
-    </div>
+
 
     <script src="/static/js/settings.js"></script>
 </body>
