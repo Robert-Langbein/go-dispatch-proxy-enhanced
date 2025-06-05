@@ -104,10 +104,12 @@ type GatewayWebInfo struct {
 	DNSPort           int      `json:"dns_port"`
 	NATInterface      string   `json:"nat_interface"`
 	AutoConfigure     bool     `json:"auto_configure"`
-	DHCPRangeStart    string   `json:"dhcp_range_start"`
-	DHCPRangeEnd      string   `json:"dhcp_range_end"`
 	IptablesRules     []string `json:"iptables_rules"`
 	Status            string   `json:"status"`
+	// iptables backup information
+	BackupExists      bool     `json:"backup_exists"`
+	BackupTimestamp   string   `json:"backup_timestamp,omitempty"`
+	IsConfigured      bool     `json:"is_configured"`
 }
 
 // Real-time traffic monitoring
@@ -143,8 +145,6 @@ type GlobalSettings struct {
 	DNSPort         int
 	NATInterface    string
 	AutoConfig      bool
-	DHCPStart       string
-	DHCPEnd         string
 }
 
 var currentSettings GlobalSettings
@@ -278,6 +278,8 @@ func (ws *WebServer) Start() error {
 	http.HandleFunc("/api/gateway", ws.handleAPIGateway)
 	http.HandleFunc("/api/gateway/toggle", ws.handleAPIGatewayToggle)
 	http.HandleFunc("/api/gateway/config", ws.handleAPIGatewayConfig)
+	http.HandleFunc("/api/gateway/iptables/backup", ws.handleAPIGatewayIptablesBackup)
+	http.HandleFunc("/api/gateway/iptables/restore", ws.handleAPIGatewayIptablesRestore)
 	http.HandleFunc("/api/settings", ws.handleAPISettings)
 	http.HandleFunc("/api/interfaces", ws.handleAPIInterfaces)
 	http.HandleFunc("/api/lb/add", ws.handleAPIAddLB)
@@ -1018,7 +1020,10 @@ func getTemplateFunctions() template.FuncMap {
 Initialize global settings from command line flags
 This should be called from main.go after flag parsing
 */
-func InitializeSettings(lhost string, lport int, webPort int, configFile string, tunnel bool, debug bool, quiet bool, gatewayMode bool, gatewayIP string, subnetCIDR string, transparentPort int, dnsPort int, natInterface string, autoConfig bool, dhcpStart string, dhcpEnd string) {
+func InitializeSettings(lhost string, lport int, webPort int, configFile string, tunnel bool, debug bool, quiet bool, gatewayMode bool, gatewayIP string, subnetCIDR string, transparentPort int, dnsPort int, natInterface string, autoConfig bool) {
+	mutex = &sync.Mutex{}
+	source_lb_indices = make(map[string]int)
+
 	currentSettings = GlobalSettings{
 		ListenHost:      lhost,
 		ListenPort:      lport,
@@ -1034,9 +1039,9 @@ func InitializeSettings(lhost string, lport int, webPort int, configFile string,
 		DNSPort:         dnsPort,
 		NATInterface:    natInterface,
 		AutoConfig:      autoConfig,
-		DHCPStart:       dhcpStart,
-		DHCPEnd:         dhcpEnd,
 	}
+
+	log.Printf("[INFO] Settings initialized for WebUI")
 }
 
 /*
@@ -1107,10 +1112,15 @@ func (ws *WebServer) handleAPIGateway(w http.ResponseWriter, r *http.Request) {
 		DNSPort:         gateway_cfg.dns_port,
 		NATInterface:    gateway_cfg.nat_interface,
 		AutoConfigure:   gateway_cfg.auto_configure,
-		DHCPRangeStart:  gateway_cfg.dhcp_range_start,
-		DHCPRangeEnd:    gateway_cfg.dhcp_range_end,
 		IptablesRules:   gateway_cfg.iptables_rules,
 		Status:          getGatewayStatus(),
+		BackupExists:    gateway_cfg.backup_created,
+		IsConfigured:    gateway_cfg.is_configured,
+	}
+	
+	// Add backup timestamp if backup exists
+	if gateway_cfg.backup_created {
+		gatewayInfo.BackupTimestamp = gateway_cfg.backup_timestamp.Format("2006-01-02 15:04:05")
 	}
 	
 	json.NewEncoder(w).Encode(gatewayInfo)
@@ -1208,8 +1218,7 @@ func (ws *WebServer) handleAPIGatewayConfig(w http.ResponseWriter, r *http.Reque
 		gateway_cfg.dns_port = newConfig.dns_port
 		gateway_cfg.nat_interface = newConfig.nat_interface
 		gateway_cfg.auto_configure = newConfig.auto_configure
-		gateway_cfg.dhcp_range_start = newConfig.dhcp_range_start
-		gateway_cfg.dhcp_range_end = newConfig.dhcp_range_end
+
 
 		// If gateway was enabled, restart it with new configuration
 		if wasEnabled {
@@ -1252,6 +1261,55 @@ func getGatewayStatus() string {
 	}
 	
 	return "error"
+}
+
+/*
+Handle Gateway iptables backup status API endpoint
+*/
+func (ws *WebServer) handleAPIGatewayIptablesBackup(w http.ResponseWriter, r *http.Request) {
+	if !ws.isAuthenticated(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Return iptables backup information
+	backupInfo := get_iptables_backup_info()
+	json.NewEncoder(w).Encode(backupInfo)
+}
+
+/*
+Handle Gateway iptables restore API endpoint
+*/
+func (ws *WebServer) handleAPIGatewayIptablesRestore(w http.ResponseWriter, r *http.Request) {
+	if !ws.isAuthenticated(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Attempt to restore original iptables rules
+	if err := restore_original_iptables_rules(); err != nil {
+		response := map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success": true,
+		"message": "Original iptables rules restored successfully",
+	}
+	json.NewEncoder(w).Encode(response)
 }
 
 /*
@@ -1307,8 +1365,6 @@ func (ws *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 			DNSPort:         gateway_cfg.dns_port,
 			NATInterface:    gateway_cfg.nat_interface,
 			AutoConfigure:   gateway_cfg.auto_configure,
-			DHCPRangeStart:  gateway_cfg.dhcp_range_start,
-			DHCPRangeEnd:    gateway_cfg.dhcp_range_end,
 			IptablesRules:   gateway_cfg.iptables_rules,
 			Status:          getGatewayStatus(),
 		},
@@ -1367,8 +1423,7 @@ func (ws *WebServer) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			"dns_port":         currentSettings.DNSPort,
 			"nat_interface":    currentSettings.NATInterface,
 			"auto_config":      currentSettings.AutoConfig,
-			"dhcp_start":       currentSettings.DHCPStart,
-			"dhcp_end":         currentSettings.DHCPEnd,
+
 		}
 		json.NewEncoder(w).Encode(settings)
 	} else if r.Method == "POST" {
@@ -1433,17 +1488,7 @@ func (ws *WebServer) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			updated = append(updated, "auto_configure")
 		}
 
-		if dhcpStart, ok := newSettings["dhcp_start"].(string); ok && dhcpStart != "" {
-			currentSettings.DHCPStart = dhcpStart
-			gateway_cfg.dhcp_range_start = dhcpStart
-			updated = append(updated, "dhcp_start")
-		}
 
-		if dhcpEnd, ok := newSettings["dhcp_end"].(string); ok && dhcpEnd != "" {
-			currentSettings.DHCPEnd = dhcpEnd
-			gateway_cfg.dhcp_range_end = dhcpEnd
-			updated = append(updated, "dhcp_end")
-		}
 
 		// Settings that require restart - but still save them to database
 		if listenHost, ok := newSettings["listen_host"].(string); ok && listenHost != "" {
@@ -1491,8 +1536,6 @@ func (ws *WebServer) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			DNSPort:         currentSettings.DNSPort,
 			NATInterface:    currentSettings.NATInterface,
 			AutoConfigure:   currentSettings.AutoConfig,
-			DHCPRangeStart:  currentSettings.DHCPStart,
-			DHCPRangeEnd:    currentSettings.DHCPEnd,
 		}
 		if err := saveGatewayConfig(dbGatewayConfig); err != nil {
 			log.Printf("[ERROR] Failed to save gateway config to database: %v", err)
@@ -1782,8 +1825,6 @@ func (ws *WebServer) handleAPIExport(w http.ResponseWriter, r *http.Request) {
 			"dns_port":          gateway_cfg.dns_port,
 			"nat_interface":     gateway_cfg.nat_interface,
 			"auto_configure":    gateway_cfg.auto_configure,
-			"dhcp_range_start":  gateway_cfg.dhcp_range_start,
-			"dhcp_range_end":    gateway_cfg.dhcp_range_end,
 		},
 		"statistics": map[string]interface{}{
 			"total_connections": ws.getTotalConnections(),
@@ -2100,7 +2141,7 @@ func (ws *WebServer) getDeviceInfo(ip string) map[string]interface{} {
 	
 	// TODO: Add more device detection methods here:
 	// - ARP table parsing for MAC address vendor lookup
-	// - DHCP lease information
+			// - Network interface monitoring
 	// - NetBIOS name resolution
 	// - Bonjour/mDNS service discovery
 	// - SNMP queries for managed devices

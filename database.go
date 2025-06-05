@@ -52,8 +52,6 @@ type DBGatewayConfig struct {
 	DNSPort         int    `json:"dns_port"`
 	NATInterface    string `json:"nat_interface"`
 	AutoConfigure   bool   `json:"auto_configure"`
-	DHCPRangeStart  string `json:"dhcp_range_start"`
-	DHCPRangeEnd    string `json:"dhcp_range_end"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 }
@@ -86,9 +84,7 @@ var defaultGatewayConfig = DBGatewayConfig{
 	TransparentPort: 8888,
 	DNSPort:         5353,
 	NATInterface:    "",
-	AutoConfigure:   true,
-	DHCPRangeStart:  "192.168.100.10",
-	DHCPRangeEnd:    "192.168.100.100",
+	AutoConfigure:   false, // Changed to false - user must explicitly enable iptables configuration
 }
 
 /*
@@ -173,9 +169,7 @@ func createTables() error {
 		transparent_port INTEGER NOT NULL DEFAULT 8888,
 		dns_port INTEGER NOT NULL DEFAULT 5353,
 		nat_interface TEXT DEFAULT '',
-		auto_configure BOOLEAN NOT NULL DEFAULT 1,
-		dhcp_range_start TEXT NOT NULL DEFAULT '192.168.100.10',
-		dhcp_range_end TEXT NOT NULL DEFAULT '192.168.100.100',
+		auto_configure BOOLEAN NOT NULL DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`
@@ -335,14 +329,14 @@ func loadGatewayConfig() (DBGatewayConfig, error) {
 	var config DBGatewayConfig
 	query := `
 		SELECT id, enabled, gateway_ip, subnet_cidr, transparent_port, dns_port,
-		       nat_interface, auto_configure, dhcp_range_start, dhcp_range_end,
+		       nat_interface, auto_configure,
 		       created_at, updated_at
 		FROM gateway_config ORDER BY updated_at DESC LIMIT 1`
 
 	err := db.QueryRow(query).Scan(
 		&config.ID, &config.Enabled, &config.GatewayIP, &config.SubnetCIDR,
 		&config.TransparentPort, &config.DNSPort, &config.NATInterface,
-		&config.AutoConfigure, &config.DHCPRangeStart, &config.DHCPRangeEnd,
+		&config.AutoConfigure,
 		&config.CreatedAt, &config.UpdatedAt,
 	)
 
@@ -361,13 +355,13 @@ func saveGatewayConfig(config DBGatewayConfig) error {
 	query := `
 		INSERT OR REPLACE INTO gateway_config 
 		(id, enabled, gateway_ip, subnet_cidr, transparent_port, dns_port, 
-		 nat_interface, auto_configure, dhcp_range_start, dhcp_range_end, updated_at)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+		 nat_interface, auto_configure, updated_at)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
 
 	_, err := db.Exec(query,
 		config.Enabled, config.GatewayIP, config.SubnetCIDR,
 		config.TransparentPort, config.DNSPort, config.NATInterface,
-		config.AutoConfigure, config.DHCPRangeStart, config.DHCPRangeEnd,
+		config.AutoConfigure,
 	)
 
 	if err != nil {
@@ -531,9 +525,6 @@ func syncGatewayConfigFromDatabase() error {
 	gateway_cfg.dns_port = dbGatewayConfig.DNSPort
 	gateway_cfg.nat_interface = dbGatewayConfig.NATInterface
 	gateway_cfg.auto_configure = dbGatewayConfig.AutoConfigure
-	gateway_cfg.dhcp_range_start = dbGatewayConfig.DHCPRangeStart
-	gateway_cfg.dhcp_range_end = dbGatewayConfig.DHCPRangeEnd
-
 	// Update current settings
 	currentSettings.GatewayMode = dbGatewayConfig.Enabled
 	currentSettings.GatewayIP = dbGatewayConfig.GatewayIP
@@ -542,8 +533,6 @@ func syncGatewayConfigFromDatabase() error {
 	currentSettings.DNSPort = dbGatewayConfig.DNSPort
 	currentSettings.NATInterface = dbGatewayConfig.NATInterface
 	currentSettings.AutoConfig = dbGatewayConfig.AutoConfigure
-	currentSettings.DHCPStart = dbGatewayConfig.DHCPRangeStart
-	currentSettings.DHCPEnd = dbGatewayConfig.DHCPRangeEnd
 
 	log.Printf("[INFO] Gateway configuration synchronized from database")
 	return nil

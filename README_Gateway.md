@@ -45,8 +45,7 @@ sudo ./go-dispatch-proxy -gateway \
   -transparent-port 8888 \
   -dns-port 5353 \
   -nat-interface eth0 \
-  -dhcp-start 192.168.100.10 \
-  -dhcp-end 192.168.100.100 \
+  
   -web 80 \
   192.168.1.10@3 10.81.201.18@2
 ```
@@ -62,8 +61,7 @@ sudo ./go-dispatch-proxy -gateway \
 | `-dns-port` | 5353 | Port für DNS-Server |
 | `-nat-interface` | auto | Netzwerk-Interface für NAT |
 | `-auto-config` | true | Automatische iptables-Konfiguration |
-| `-dhcp-start` | 192.168.100.10 | DHCP-Bereich Start |
-| `-dhcp-end` | 192.168.100.100 | DHCP-Bereich Ende |
+
 
 ## 🔐 Voraussetzungen
 
@@ -342,17 +340,109 @@ iptables -A INPUT -p udp --dport 5353 -j ACCEPT  # DNS
 ## 🚀 Zukunftspläne
 
 ### Geplante Features
-- **DHCP-Server Integration**: Eingebauter DHCP-Server
+
 - **IPv6-Support**: Vollständige IPv6-Unterstützung
 - **QoS-Integration**: Traffic Shaping und Priorisierung
 - **VPN-Integration**: Nahtlose VPN-Unterstützung
 - **Clustering**: Hochverfügbarkeit mit mehreren Gateway-Instanzen
 
 ### Roadmap
-1. **v4.0**: DHCP-Server Integration
+1. **v4.0**: IPv6-Support und erweiterte Funktionen
 2. **v4.1**: IPv6-Support
 3. **v4.2**: QoS und Traffic Shaping
 4. **v5.0**: Enterprise Features und Clustering
+
+## iptables Backup and Restore
+
+### Overview
+
+The gateway mode now includes enhanced iptables backup and restore functionality to ensure system safety when automatically configuring network rules.
+
+### Key Features
+
+- **Default Safety**: AutoConfigure is now **disabled by default** - users must explicitly enable it
+- **Automatic Backup**: When AutoConfigure is enabled, the original iptables rules are automatically backed up before applying gateway rules
+- **Manual Restore**: Original iptables rules can be restored at any time via the WebInterface
+- **Backup Status**: Real-time status of backup availability and configuration state
+
+### Configuration
+
+The `auto_configure` option is now **disabled by default** for safety:
+
+```bash
+# AutoConfigure disabled (default) - manual iptables configuration required
+./go-dispatch-proxy-enhanced -gateway -gateway-ip 192.168.100.1 -subnet 192.168.100.0/24
+
+# AutoConfigure enabled - automatic iptables configuration with backup
+./go-dispatch-proxy-enhanced -gateway -gateway-ip 192.168.100.1 -subnet 192.168.100.0/24 -auto-config
+```
+
+### API Endpoints
+
+#### Get iptables Backup Status
+```bash
+curl -X GET http://localhost:8090/api/gateway/iptables/backup \
+  -H "Content-Type: application/json"
+```
+
+Response:
+```json
+{
+  "backup_exists": true,
+  "backup_file": "iptables_backup.rules",
+  "backup_timestamp": "2024-01-15 14:30:25",
+  "backup_size": 2048,
+  "backup_file_exists": true,
+  "is_configured": true,
+  "auto_configure": true
+}
+```
+
+#### Restore Original iptables Rules
+```bash
+curl -X POST http://localhost:8090/api/gateway/iptables/restore \
+  -H "Content-Type: application/json"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Original iptables rules restored successfully"
+}
+```
+
+### WebInterface Integration
+
+The gateway configuration in the WebInterface now displays:
+
+- **AutoConfigure Status**: Whether automatic iptables configuration is enabled
+- **Backup Status**: Whether a backup of original rules exists
+- **Backup Timestamp**: When the backup was created
+- **Restore Button**: One-click restore of original iptables rules
+
+### Safety Features
+
+1. **No Backup Without AutoConfigure**: Backup is only created when AutoConfigure is explicitly enabled
+2. **Single Backup**: Only one backup is created per session to preserve the original state
+3. **Automatic Cleanup**: Original rules are restored when gateway mode is disabled (if AutoConfigure was used)
+4. **Manual Override**: Users can restore original rules at any time via WebInterface
+
+### Backup File Location
+
+- **Default Location**: `iptables_backup.rules` in the application directory
+- **Format**: Standard iptables-save format
+- **Permissions**: 644 (readable by owner and group)
+
+### Error Handling
+
+- If backup creation fails, gateway mode continues but without automatic rule configuration
+- If restore fails, detailed error messages are provided via API and logs
+- Missing backup files are detected and reported appropriately
+
+### Migration Notes
+
+**Important**: Existing installations will have AutoConfigure **disabled by default** after upgrade. Users who want automatic iptables configuration must explicitly enable it in the settings or via command line flag.
 
 ---
 

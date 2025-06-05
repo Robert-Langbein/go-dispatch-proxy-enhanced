@@ -359,8 +359,7 @@ class SettingsManager {
             'transparentPort': config.transparent_port || 8888,
             'dnsPort': config.dns_port || 5353,
             'autoConfig': config.auto_configure || true,
-            'dhcpStart': config.dhcp_range_start || '192.168.100.10',
-            'dhcpEnd': config.dhcp_range_end || '192.168.100.100'
+
         };
 
         Object.entries(elements).forEach(([id, value]) => {
@@ -468,8 +467,7 @@ class SettingsManager {
             transparent_port: parseInt(document.getElementById('transparentPort')?.value) || 8888,
             dns_port: parseInt(document.getElementById('dnsPort')?.value) || 5353,
             auto_configure: document.getElementById('autoConfig')?.checked || true,
-            dhcp_start: document.getElementById('dhcpStart')?.value || '192.168.100.10',
-            dhcp_end: document.getElementById('dhcpEnd')?.value || '192.168.100.100',
+            
             
             // Performance settings
             max_connections: parseInt(document.getElementById('maxConnections')?.value) || 500,

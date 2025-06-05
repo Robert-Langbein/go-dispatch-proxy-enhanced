@@ -29,8 +29,11 @@ type gateway_config struct {
 	nat_interface      string
 	backup_rules_file  string
 	auto_configure     bool
-	dhcp_range_start   string
-	dhcp_range_end     string
+	// Enhanced backup functionality
+	backup_created     bool              // Whether a backup has been created
+	backup_timestamp   time.Time         // When the backup was created
+	original_rules     string            // Original iptables rules content
+	is_configured      bool              // Whether our rules are currently applied
 }
 
 // Global gateway configuration
@@ -455,7 +458,7 @@ func update_connection_traffic(conn_id string, bytes_in, bytes_out int64) {
 			lb_list[lb_index].bytes_in_total += bytes_in
 			lb_list[lb_index].bytes_out_total += bytes_out
 			lb_list[lb_index].last_traffic_update = time.Now()
-			mutex.Unlock()
+	mutex.Unlock()
 		}
 		
 		// Update client traffic stats
@@ -895,7 +898,7 @@ func main() {
 	// Only webgui flag for initial setup - all settings managed via database
 	var webPort = flag.Int("webgui", 8090, "Web GUI port for initial setup (saved to database on first run)")
 	flag.Parse()
-
+	
 	log.Printf("[INFO] Go Dispatch Proxy Enhanced v3.0 - Database Edition")
 	log.Printf("[INFO] Starting with default settings - configuration via WebUI")
 
@@ -933,8 +936,6 @@ func main() {
 		subnet_cidr:      currentSettings.SubnetCIDR,
 		nat_interface:    currentSettings.NATInterface,
 		auto_configure:   currentSettings.AutoConfig,
-		dhcp_range_start: currentSettings.DHCPStart,
-		dhcp_range_end:   currentSettings.DHCPEnd,
 		backup_rules_file: "iptables_backup.rules",
 		iptables_rules:   make([]string, 0),
 	}
@@ -950,7 +951,7 @@ func main() {
 	if quiet_mode {
 		log.SetOutput(io.Discard)
 	} else {
-		log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
+	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
 	}
 
 	// Enable debug logging if configured
@@ -968,7 +969,7 @@ func main() {
 
 	// Initialize web server settings (no longer needs all the parameters)
 	InitializeSettingsFromDatabase()
-	
+
 	// Start web server (always enabled by default now)
 	if currentSettings.WebPort > 0 {
 		log.Printf("[INFO] Starting web server on port %d", currentSettings.WebPort)
@@ -1258,13 +1259,39 @@ func detect_nat_interface() (string, error) {
 Backup existing iptables rules
 */
 func backup_iptables_rules() error {
+	// Only create backup if auto_configure is enabled and no backup exists yet
+	if !gateway_cfg.auto_configure {
+		log.Printf("[INFO] AutoConfigure disabled - skipping iptables backup")
+		return nil
+	}
+	
+	if gateway_cfg.backup_created {
+		log.Printf("[INFO] iptables backup already exists, skipping")
+		return nil
+	}
+	
+	log.Printf("[INFO] Creating iptables backup before applying gateway rules...")
+	
 	cmd := exec.Command("iptables-save")
 	output, err := cmd.Output()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to save current iptables rules: %v", err)
 	}
 	
-	return os.WriteFile(gateway_cfg.backup_rules_file, output, 0644)
+	// Save to file
+	if err := os.WriteFile(gateway_cfg.backup_rules_file, output, 0644); err != nil {
+		return fmt.Errorf("failed to write backup file: %v", err)
+	}
+	
+	// Store in memory for API access
+	gateway_cfg.original_rules = string(output)
+	gateway_cfg.backup_created = true
+	gateway_cfg.backup_timestamp = time.Now()
+	
+	log.Printf("[INFO] iptables backup created successfully: %s", gateway_cfg.backup_rules_file)
+	log.Printf("[INFO] Backup timestamp: %s", gateway_cfg.backup_timestamp.Format("2006-01-02 15:04:05"))
+	
+	return nil
 }
 
 /*
@@ -1319,6 +1346,7 @@ func configure_iptables_rules() error {
 	}
 	
 	log.Printf("[INFO] iptables rules configured successfully")
+	gateway_cfg.is_configured = true
 	return nil
 }
 
@@ -1561,23 +1589,82 @@ func cleanup_gateway_mode() error {
 	
 	log.Printf("[INFO] Cleaning up gateway mode...")
 	
-	// Restore iptables rules from backup
-	if _, err := os.Stat(gateway_cfg.backup_rules_file); err == nil {
-		cmd := exec.Command("iptables-restore", gateway_cfg.backup_rules_file)
-		if err := cmd.Run(); err != nil {
-			log.Printf("[WARN] Failed to restore iptables rules: %v", err)
-		} else {
-			log.Printf("[INFO] iptables rules restored from backup")
+	// Only restore if auto_configure was enabled and we have a backup
+	if gateway_cfg.auto_configure && gateway_cfg.backup_created {
+		if _, err := os.Stat(gateway_cfg.backup_rules_file); err == nil {
+			cmd := exec.Command("iptables-restore", gateway_cfg.backup_rules_file)
+			if err := cmd.Run(); err != nil {
+				log.Printf("[WARN] Failed to restore iptables rules: %v", err)
+			} else {
+				log.Printf("[INFO] iptables rules restored from backup")
+				gateway_cfg.is_configured = false
+			}
 		}
 	}
 	
-	// Remove custom chains
-	exec.Command("iptables", "-t", "nat", "-F", "DISPATCH_PROXY").Run()
-	exec.Command("iptables", "-t", "nat", "-X", "DISPATCH_PROXY").Run()
-	exec.Command("iptables", "-t", "mangle", "-F", "DISPATCH_PROXY").Run()
-	exec.Command("iptables", "-t", "mangle", "-X", "DISPATCH_PROXY").Run()
+	// Remove custom chains if they exist
+	if gateway_cfg.is_configured {
+		exec.Command("iptables", "-t", "nat", "-F", "DISPATCH_PROXY").Run()
+		exec.Command("iptables", "-t", "nat", "-X", "DISPATCH_PROXY").Run()
+		exec.Command("iptables", "-t", "mangle", "-F", "DISPATCH_PROXY").Run()
+		exec.Command("iptables", "-t", "mangle", "-X", "DISPATCH_PROXY").Run()
+		gateway_cfg.is_configured = false
+	}
 	
 	return nil
+}
+
+/*
+Restore original iptables rules manually (for WebInterface)
+*/
+func restore_original_iptables_rules() error {
+	if !gateway_cfg.backup_created {
+		return fmt.Errorf("no iptables backup available - cannot restore original rules")
+	}
+	
+	log.Printf("[INFO] Manually restoring original iptables rules...")
+	
+	// Restore from backup file
+	if _, err := os.Stat(gateway_cfg.backup_rules_file); err == nil {
+		cmd := exec.Command("iptables-restore", gateway_cfg.backup_rules_file)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to restore iptables rules: %v", err)
+		}
+		
+		log.Printf("[INFO] Original iptables rules restored successfully")
+		log.Printf("[INFO] Backup was created on: %s", gateway_cfg.backup_timestamp.Format("2006-01-02 15:04:05"))
+		
+		gateway_cfg.is_configured = false
+		return nil
+	}
+	
+	return fmt.Errorf("backup file not found: %s", gateway_cfg.backup_rules_file)
+}
+
+/*
+Get iptables backup status and information
+*/
+func get_iptables_backup_info() map[string]interface{} {
+	info := map[string]interface{}{
+		"backup_exists":   gateway_cfg.backup_created,
+		"backup_file":     gateway_cfg.backup_rules_file,
+		"is_configured":   gateway_cfg.is_configured,
+		"auto_configure":  gateway_cfg.auto_configure,
+	}
+	
+	if gateway_cfg.backup_created {
+		info["backup_timestamp"] = gateway_cfg.backup_timestamp.Format("2006-01-02 15:04:05")
+		info["backup_size"] = len(gateway_cfg.original_rules)
+		
+		// Check if backup file still exists
+		if _, err := os.Stat(gateway_cfg.backup_rules_file); err == nil {
+			info["backup_file_exists"] = true
+		} else {
+			info["backup_file_exists"] = false
+		}
+	}
+	
+	return info
 }
 
 /*
